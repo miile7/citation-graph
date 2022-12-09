@@ -1,0 +1,7 @@
+{
+    "python.formatting.provider": "black",
+    "editor.rulers": [89],
+    "files.associations": {
+        "README": "markdown"
+    }
+}
