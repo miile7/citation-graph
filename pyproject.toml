@@ -1,8 +1,8 @@
 [tool.poetry]
-name = ""
+name = "citation_graph"
 version = "0.0.1"
 description = ""
-authors = [""]
+authors = ["miile7"]
 readme = "README.md"
 
 [tool.poetry.dependencies]

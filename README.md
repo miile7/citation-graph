@@ -1,20 +1,6 @@
-# python_template
+# Citation Graph
 
-## python_template usage
-
-== Remove this complete section before first commit, this is template instructions only ==
-
-1. Search for `python_template` and replace it with your new name (lower snake case, except the `NAME` in `python_template.py`, this should be human readable) everywhere.
-2. Rename the `python_template.py` file in `src/python_template`
-3. Rename the `python_template` directory in `src/`
-4. Make sure there is a name set in `pyproject.toml` (lower snake case)
-5. Run `poetry install`
-6. Select the correct interpreter for VSCode
-7. Remove this section
-
-== End remove ==
-
-
+## Citation Graph usage
 
 ## Installation
 
