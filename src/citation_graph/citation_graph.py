@@ -1,17 +1,13 @@
-from asyncio import create_task, run as run_async
+from asyncio import gather, run as run_async
 from argparse import ArgumentParser, Namespace
 from logging import DEBUG, INFO, WARNING, basicConfig, getLogger
 from typing import List, TypedDict
 from typing_extensions import Unpack
 
-from citation_graph.paper import Paper
+from citation_graph.paper import AuthorName, Paper
 from citation_graph.semantic_scholar import SematicScholarTraverser
 from citation_graph.traverser import Traverser
-
-try:
-    from citation_graph.version import get_version
-except ModuleNotFoundError:
-    from version import get_version
+from citation_graph.version import get_version
 
 
 NAME = "Citation Graph"
@@ -34,7 +30,7 @@ class ParserArgs(TypedDict, total=False):
 
 async def run(args: Namespace) -> None:
     start_paper = Paper(
-        [("root", "root")],
+        [AuthorName("root", "root")],
         0,
         "Root",
         "10.1145/3062341.3062363",
@@ -43,10 +39,9 @@ async def run(args: Namespace) -> None:
 
     tasks = []
     for traverser in TRAVERSER:
-        tasks.append(create_task(traverser.collect(start_paper, args.max_depth)))
+        tasks.append(traverser.collect(start_paper, args.max_depth))
 
-    for task in tasks:
-        await task
+    await gather(*tasks)
 
     for traverser in TRAVERSER:
         print(traverser.papers)

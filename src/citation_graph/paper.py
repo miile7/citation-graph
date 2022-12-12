@@ -2,11 +2,14 @@ from dataclasses import dataclass
 from typing import List, NamedTuple, Optional
 
 
-Name = NamedTuple("Name", [("forename", str), ("lastname", str)])
+class AuthorName(NamedTuple):
+    forename: str
+    lastname: str
+
 
 @dataclass
 class Paper:
-    authors: List[Name]
+    authors: List[AuthorName]
     year: int
     title: str
     doi: str

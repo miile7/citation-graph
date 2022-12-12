@@ -1,14 +1,19 @@
-from asyncio import create_task, sleep
+from asyncio import gather, sleep
 from dataclasses import dataclass
 from logging import getLogger
-from typing import Coroutine, Dict, Generator, Generic, List, NamedTuple, Optional, Tuple, TypeVar, TypedDict
+from random import random
+from typing import (
+    Dict,
+    Generator,
+    Generic,
+    List,
+    NamedTuple,
+    Optional,
+    TypeVar,
+    TypedDict,
+)
 
 from citation_graph.paper import Paper
-
-
-_PAPER_NODE_LEVEL_INDEX = 0
-_PAPER_NODE_PAPER_INDEX = 1
-_PAPER_NODE_PARENT_INDEX = 2
 
 
 class _PaperNode(NamedTuple):
@@ -26,12 +31,11 @@ class _GraphNode(Generic[_T]):
     children: List["_GraphNode[_T]"]
 
 
-class Graph(_GraphNode):
-    pass
+Graph = _GraphNode
 
 
 class MetaData(TypedDict, total=False):
-    idle_time: int  # idle time in seconds between two requests
+    idle_time: float  # idle time in seconds between two requests
 
 
 class Traverser:
@@ -53,11 +57,9 @@ class Traverser:
         self.papers[paper.doi] = _PaperNode(level, paper, parent_doi)
 
     def _iter_papers_for_level(self, level: int) -> Generator[Paper, None, None]:
-        for paper in self.papers.values():
-            if paper[_PAPER_NODE_LEVEL_INDEX] == level:
-                p = paper[_PAPER_NODE_PAPER_INDEX]
-                assert isinstance(p, Paper)  # for mypy
-                yield p
+        for node in self.papers.values():
+            if node.depth == level:
+                yield node.paper
 
     def _register_cited_by(self, level: int, paper: Paper, parent: Paper) -> bool:
         if paper.doi in self.papers:
@@ -67,8 +69,16 @@ class Traverser:
         return True
 
     async def _collect_papers_for_next_level(self, current_level: int) -> None:
+        if "idle_ime" in self.metadata and self.metadata["idle_time"] > 0:
+            # prevent spawning all requests at the same time
+            await sleep(random() * self.metadata["idle_time"])
+
         for parent in self._iter_papers_for_level(current_level):
             self.logger.debug(f"Finding citations of {parent}")
+
+            if "idle_ime" in self.metadata and self.metadata["idle_time"] > 0:
+                await sleep(self.metadata["idle_time"])
+
             cited_by_papers = await self._get_cited_by(parent)
 
             self.logger.debug(f"Found {len(cited_by_papers)} citations of {parent}")
@@ -88,40 +98,33 @@ class Traverser:
         tasks = []
         for self._depth in range(self.max_depth):
             self.logger.debug(f"Performing step {self._depth}")
-            tasks.append(create_task(self._collect_papers_for_next_level(self._depth)))
+            tasks.append(self._collect_papers_for_next_level(self._depth))
 
-            if "idle_ime" in self.metadata and self.metadata["idle_time"] > 0:
-                sleep(self.metadata["idle_time"])
-
-        for task in tasks:
-            await task
+        gather(*tasks)
 
     async def _get_cited_by(self, paper: Paper) -> List[Paper]:
         """Get all papers that cite the `paper` from the parameters."""
         raise NotImplementedError()
 
-    @classmethod
+    @staticmethod
     def to_list(traverser: "Traverser") -> List[Paper]:
         if len(traverser.papers) <= 1:
             raise Exception("Run Traverser.collect() before parsing to a list.")
 
         return [
-            node[_PAPER_NODE_PAPER_INDEX] for node in
-            sorted(
-                traverser.papers.values(),
-                key=lambda node: node[_PAPER_NODE_LEVEL_INDEX]
-            )
+            node.paper
+            for node in sorted(traverser.papers.values(), key=lambda node: node.depth)
         ]
 
-    @classmethod
+    @staticmethod
     def to_graph(traverser: "Traverser") -> Graph[Paper]:
         if len(traverser.papers) <= 1:
             raise Exception("Run Traverser.collect() before parsing to a list.")
 
         root: Optional[Paper] = None
-        for paper in traverser.papers:
-            if paper[_PAPER_NODE_LEVEL_INDEX] == 0:
-                root = paper
+        for node in traverser.papers.values():
+            if node.depth == 0:
+                root = node.paper
                 break
 
         if root is None:
@@ -129,17 +132,16 @@ class Traverser:
 
         return Traverser._recursive_create_graph_nodes(traverser, root)
 
-    @classmethod
+    @staticmethod
     def _recursive_create_graph_nodes(
         traverser: "Traverser", parent: Paper
     ) -> _GraphNode[Paper]:
         children: List[_GraphNode[Paper]] = []
 
-        for paper in traverser.papers:
-            if paper[_PAPER_NODE_PARENT_INDEX] == parent.doi:
-                children.append(Traverser._recursive_create_graph_nodes(
-                    traverser, paper[_PAPER_NODE_PAPER_INDEX]
-                ))
+        for node in traverser.papers.values():
+            if node.parent_doi == parent.doi:
+                children.append(
+                    Traverser._recursive_create_graph_nodes(traverser, node.paper)
+                )
 
         return _GraphNode(parent, children)
-
