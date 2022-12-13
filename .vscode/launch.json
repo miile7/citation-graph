@@ -9,7 +9,8 @@
             "type": "python",
             "request": "launch",
             "module": "citation_graph",
-            "justMyCode": true
+            "justMyCode": true,
+            "args": ["-d=1", "-c", "-v", "10.1007/978-3-663-16170-7_7"]
         }
     ]
 }

@@ -1,2 +1,2 @@
-Crossref
-https://www.semanticscholar.org/product/api
+Crossref - Not yet implemented
+semanticscholar
