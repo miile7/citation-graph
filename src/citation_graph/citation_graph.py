@@ -37,7 +37,13 @@ class ParserArgs(TypedDict, total=False):
 
 
 def visualize(graph: Graph, filename: str) -> None:
-    net = Network()
+    net = Network(
+        height="750px",
+        width="100%",
+        bgcolor="#222222",
+        font_color="white",
+        filter_menu=True,
+    )
     net.from_nx(graph)
     net.show(filename)
 

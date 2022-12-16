@@ -28,15 +28,31 @@ class Paper:
     citation_count: Optional[int] = None
     meta: Dict[str, Any] = field(default_factory=dict)
 
-    def __str__(self) -> str:
-        if len(self.authors) > 2:
-            return f"{self.authors[0].lastname} et al. {self.year}"
-        elif len(self.authors) == 2:
+    def get_authors_str(self, short=False) -> str:
+        authors = [
+            f"{a.forename} {a.lastname}"
+            if not short
+            else a.lastname
+            for a in self.authors
+        ]
+
+        if len(authors) > 2:
+            if short:
+                return f"{authors[0]} et al."
+            return f"{', '.join(authors[:-1])} and {authors[-1]}"
+        elif len(authors) == 2:
             return (
-                f"{self.authors[0].lastname} and {self.authors[1].lastname} {self.year}"
+                f"{authors[0]} and {authors[1]}"
             )
-        elif len(self.authors) == 1:
-            return f"{self.authors[0].lastname} {self.year}"
+        elif len(authors) == 1:
+            return authors[0]
+        else:
+            return ""
+
+
+    def __str__(self) -> str:
+        if len(self.authors) > 0:
+            return f"{self.get_authors_str(True)} {self.year}"
         else:
             return f"{self.get_id()} {self.year}"
 

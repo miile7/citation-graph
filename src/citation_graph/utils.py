@@ -4,7 +4,7 @@ from os import name, environ, path
 from pathlib import Path
 from re import compile
 from sys import platform
-from typing import Iterable, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from citation_graph.paper import Paper
 
@@ -61,22 +61,17 @@ def get_size(paper: Paper) -> float:
     )
 
 
-def min_max(iter: Iterable[float]) -> Tuple[float, float]:
-    min = float("INF")
-    max = -float("INF")
-
-    for i in iter:
-        try:
-            if i < min:
-                min = i
-            if i > max:
-                max = i
-        except TypeError:
-            pass
-    return min, max
-
-
 def hsv_to_hex(h: float, s: float, v: float) -> str:
     r, g, b = hsv_to_rgb(h, s, v)
 
     return "#{:02X}{:02X}{:02X}".format(int(r * 255), int(g * 255), int(b * 255))
+
+
+def get_colormap(values: List[int]) -> Dict[int, str]:
+    color_map: Dict[int, str] = {}
+    m = len(values)
+
+    for i, value in enumerate(sorted(values)):
+        color_map[value] = hsv_to_hex(*get_hsv(i, (0, m)))
+
+    return color_map

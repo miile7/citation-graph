@@ -18,7 +18,7 @@ from typing import (
 )
 
 from citation_graph.paper import IdType, Paper
-from citation_graph.utils import get_hsv, get_size, hsv_to_hex, min_max
+from citation_graph.utils import get_colormap, get_size
 
 
 @dataclass
@@ -256,22 +256,30 @@ class Traverser:
 
         graph = NXGraph()
 
-        year_range = min_max((n.paper.year for n in traverser.papers.values()))
+        color_map = get_colormap([n.paper.year for n in traverser.papers.values()])
 
-        Traverser._add_nx_graph_node(graph, root, year_range)
-        Traverser._recursive_create_nx_graph_nodes(traverser, root, graph, year_range)
+        Traverser._add_nx_graph_node(graph, root, color_map)
+        Traverser._recursive_create_nx_graph_nodes(traverser, root, graph, color_map)
 
         return graph
 
     @staticmethod
     def _add_nx_graph_node(
-        graph: NXGraph, paper: Paper, year_range: Tuple[float, float]
+        graph: NXGraph, paper: Paper, color_map: Dict[int, str]
     ) -> None:
         graph.add_node(
             paper.get_id(),
             label=str(paper),
             size=get_size(paper),
-            color=hsv_to_hex(*get_hsv(paper.year, year_range)),
+            color=color_map[paper.year],
+            # group=paper.year,
+            year=paper.year,
+            title=(
+                f"<h3>{paper.title}</h3>"
+                f"<p>{paper.year}, {paper.get_authors_str()}</p>"
+                f"<p><a href='{paper.url}'>{paper.url}</a></p>"
+                # f"<p>{paper.abstract}</p>"
+            )
         )
 
     @staticmethod
@@ -283,13 +291,13 @@ class Traverser:
         traverser: "Traverser",
         parent: Paper,
         graph: NXGraph,
-        year_range: Tuple[float, float],
+        color_map: Dict[int, str],
     ) -> None:
         for node in traverser.papers.values():
             if node.parent_id == parent.get_id():
-                Traverser._add_nx_graph_node(graph, node.paper, year_range)
+                Traverser._add_nx_graph_node(graph, node.paper, color_map)
                 Traverser._add_nx_graph_edge(graph, parent, node.paper)
 
                 Traverser._recursive_create_nx_graph_nodes(
-                    traverser, node.paper, graph, year_range
+                    traverser, node.paper, graph, color_map
                 )
