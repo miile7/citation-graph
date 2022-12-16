@@ -48,7 +48,7 @@ class SematicScholarTraverser(Traverser):
 
     def __init__(self, *args, **kwargs) -> None:
         if "idle_time" not in kwargs:
-            kwargs["idle_time"] = (5 * 60 / 100,)  # 100 requests per five minutes
+            kwargs["idle_time"] = 5 * 60 / 100  # 100 requests per five minutes
 
         super().__init__(*args, **kwargs)
         self.name = "semanticscholar.org"
