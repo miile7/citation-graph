@@ -4,6 +4,10 @@
 
 Citation Graph helps you creating a literature graph from one starting scientific publication. By the help of some scientific databases (currently only [semanticscholar.org](https://semanticscholar.org)) it starts from one paper and looks up the citations of this paper, followed by their citations and so on.
 
+Results are cached in a local directory. If a search is then extended, this cache is used to extend the last result. Note: The program will continue after the last iteration. This means changing the number of citations per paper does not affect the cached results.
+
+To not spam databases with requests, the program waits some time between two requests. To be even more polite, a `politeness` factor can be applied that increases (or decreases) the idle duration.
+
 ## Citation Graph usage
 
 
