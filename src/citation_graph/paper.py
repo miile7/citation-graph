@@ -1,6 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from re import compile
-from typing import Dict, List, Literal, NamedTuple, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 
 WORD_BOUNDARIES_REG = compile(r"[\b]+")
@@ -26,12 +26,15 @@ class Paper:
     corpus_id: Optional[int] = None
     url: Optional[str] = None
     citation_count: Optional[int] = None
+    meta: Dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
         if len(self.authors) > 2:
             return f"{self.authors[0].lastname} et al. {self.year}"
         elif len(self.authors) == 2:
-            return f"{self.authors[0].lastname} and {self.authors[1].lastname} {self.year}"
+            return (
+                f"{self.authors[0].lastname} and {self.authors[1].lastname} {self.year}"
+            )
         elif len(self.authors) == 1:
             return f"{self.authors[0].lastname} {self.year}"
         else:

@@ -1,15 +1,13 @@
 from asyncio import gather, run as run_async
 from argparse import ArgumentParser, Namespace
 from logging import DEBUG, INFO, WARNING, basicConfig, getLogger
-from os import getcwd, path
-from re import compile
-from networkx import Graph
-from pyvis.network import Network
-from typing import ClassVar, List, Optional, Type, TypedDict
+from networkx import Graph  # type: ignore[import]
+from pyvis.network import Network  # type: ignore[import]
+from typing import List, Optional, Type, TypedDict
 from typing_extensions import Unpack
 from citation_graph.caching import is_cached, load_cached, save_cache
 
-from citation_graph.paper import AuthorName, Paper
+from citation_graph.paper import Paper
 from citation_graph.semantic_scholar import SematicScholarTraverser
 from citation_graph.traverser import Traverser
 from citation_graph.utils import SLUG, get_valid_filename
@@ -44,21 +42,31 @@ def visualize(graph: Graph, filename: str) -> None:
     net.show(filename)
 
 
+def save_callback(
+    start_paper: Optional[Paper], traversers: List[Traverser], args: Namespace
+) -> None:
+    # This function exists for mypy only, start_paper is never None, otherwise the
+    # program aborts with an error before this function is ever executed
+    if start_paper is not None:
+        save_cache(start_paper, traversers, args)
+
+
 async def run(args: Namespace) -> None:
     start_paper: Optional[Paper] = None
     traversers: List[Traverser] = []
     for traverser_class in TRAVERSER:
         traverser = traverser_class(
-            save_callback=lambda t: save_cache(start_paper, traversers, args),
+            save_callback=lambda: save_callback(start_paper, traversers, args),
             max_citations_per_paper=args.max_citations_per_paper,
-            politeness_factor=args.politeness_factor
+            politeness_factor=args.politeness_factor,
         )
         traversers.append(traverser)
-        try:
-            start_paper = await traverser.get_paper("doi", args.doi)
-            break
-        except ValueError:
-            pass
+
+        if start_paper is None:
+            try:
+                start_paper = await traverser.get_paper("doi", args.doi)
+            except ValueError:
+                pass
 
     if start_paper is None:
         raise Exception(f"Could not find any paper for DOI {args.doi}")
@@ -114,7 +122,7 @@ def get_arg_parser() -> ArgumentParser:
         "-d",
         dest="max_depth",
         help=(
-            "The maximum depth to search papers, if 1, only the root paper is included "
+            "The maximum depth to search papers, if 0, only the root paper is included "
             f"in the result, default is {DEFAULT_MAX_DEPTH}"
         ),
         default=DEFAULT_MAX_DEPTH,
@@ -127,7 +135,7 @@ def get_arg_parser() -> ArgumentParser:
         help="Clear the cache before fetching. This ensures fresh data.",
         action="store_const",
         const=True,
-        default=False
+        default=False,
     )
     parser.add_argument(
         "--max-citations-per-paper",
@@ -138,20 +146,20 @@ def get_arg_parser() -> ArgumentParser:
             f"{DEFAULT_MAX_CITATIONS_PER_PAPER}"
         ),
         type=int,
-        default=DEFAULT_MAX_CITATIONS_PER_PAPER
+        default=DEFAULT_MAX_CITATIONS_PER_PAPER,
     )
     parser.add_argument(
         "--politeness",
         "-p",
         dest="politeness_factor",
         help=(
-            "A factor that is multiplied with the idle time that each database traverser"
-            " waits between two requests, using values >1 will be more polite but slow "
-            "down the requests, values <1 will be faster but may cause your IP being "
-            f"blocked, default is {DEFAULT_POLITENESS_FACTOR}"
+            "A factor that is multiplied with the idle time that each database "
+            "traverser waits between two requests, using values >1 will be more polite "
+            "but slow down the requests, values <1 will be faster but may cause your "
+            f"IP being blocked, default is {DEFAULT_POLITENESS_FACTOR}"
         ),
         type=float,
-        default=DEFAULT_POLITENESS_FACTOR
+        default=DEFAULT_POLITENESS_FACTOR,
     )
 
     parser.add_argument("doi", help="The DOI of the paper to use as the root", type=str)

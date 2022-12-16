@@ -3,7 +3,7 @@ from json import JSONEncoder, dump, load
 from logging import getLogger
 from pathlib import Path
 from time import time
-from typing import Any, List
+from typing import Any, Dict, List
 
 from citation_graph.paper import AuthorName, Paper
 from citation_graph.traverser import _PaperNode, Traverser
@@ -53,7 +53,8 @@ def create_objects(o: Any, traversers: List[Traverser]) -> Any:
 
 
 def get_cache_dir_for_paper(paper: Paper) -> Path:
-    return get_cache_dir() / f"{get_valid_filename(paper.get_id())}.cache.json"
+    paper_id = paper.get_id() or "{:x}".format(id(paper))
+    return get_cache_dir() / f"{get_valid_filename(paper_id)}.cache.json"
 
 
 def is_cached(paper: Paper) -> bool:
@@ -76,7 +77,7 @@ def save_cache(paper: Paper, traversers: List[Traverser], args: Namespace) -> No
             "args": args.__dict__,
         }
     }
-    data = {t.name: t for t in traversers}
+    data: Dict[str, Any] = {t.name: t for t in traversers}
     data.update(meta)
 
     with open(cache_file, "w") as f:

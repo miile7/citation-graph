@@ -1,9 +1,7 @@
 from asyncio import sleep
-from colorsys import hsv_to_rgb
 from dataclasses import dataclass
 from logging import getLogger
-from math import log10
-from networkx import Graph as NXGraph
+from networkx import Graph as NXGraph  # type: ignore[import]
 from random import random
 from typing import (
     Any,
@@ -13,16 +11,14 @@ from typing import (
     Generator,
     Generic,
     List,
-    NamedTuple,
     Optional,
     Tuple,
     TypeVar,
-    TypedDict,
     Union,
 )
 
 from citation_graph.paper import IdType, Paper
-from citation_graph.utils import hsv_to_hex, min_max
+from citation_graph.utils import get_hsv, get_size, hsv_to_hex, min_max
 
 
 @dataclass
@@ -44,33 +40,9 @@ class _GraphNode(Generic[_T]):
 Graph = _GraphNode
 
 
-def _get_hsv(
-    value: float,
-    value_range: Tuple[float, float],
-    color_range: Tuple[float, float] = (0.6, 0),
-) -> Tuple[float, float, float]:
-    return (
-        (value - value_range[0])
-        / (value_range[1] - value_range[0])
-        * (color_range[1] - color_range[0])
-        + color_range[0],
-        1,
-        1,
-    )
-
-
-def _get_size(paper: Paper) -> float:
-    return 10 * log10(
-        # return (
-        paper.citation_count + 2
-        if isinstance(paper.citation_count, int)
-        else 2
-    )
-
-
 class Traverser:
     name: str
-    save_callback: Callable[["Traverser"], Any]
+    save_callback: Callable[[], Any]
     page_size: int
     max_citations_per_paper: int
     use_pagination: bool
@@ -85,8 +57,7 @@ class Traverser:
 
     def __init__(
         self,
-        name: str,
-        save_callback: Callable[["Traverser"], Any],
+        save_callback: Callable[[], Any],
         page_size: int = 100,
         max_citations_per_paper: int = 300,
         politeness_factor: float = 1,
@@ -98,7 +69,6 @@ class Traverser:
 
         self.papers = {}
 
-        self.name = name
         self.save_callback = save_callback
         self.page_size = page_size
         self.max_citations_per_paper = max_citations_per_paper
@@ -133,12 +103,14 @@ class Traverser:
         self._add_paper_node(level, paper, parent.get_id())
         return True
 
-    def _add_citation_count(self, paper: Paper, citation_count_inc: int) -> None:
-        id = paper.get_id()
-        if id in self.papers:
-            if self.papers[id].paper.citation_count is None:
-                self.papers[id].paper.citation_count = 0
-            self.papers[id].paper.citation_count += citation_count_inc
+    def _add_citation_count(
+        self, paper_id: Optional[str], citation_count_inc: int
+    ) -> None:
+        if paper_id in self.papers:
+            node = self.papers[paper_id]
+            if node.paper.citation_count is None:
+                node.paper.citation_count = 0
+            node.paper.citation_count += citation_count_inc
 
     async def _collect_papers_for_next_level(self, current_level: int) -> None:
         tasks: List[Coroutine[Any, Any, Tuple[Paper, List[Paper]]]] = []
@@ -152,14 +124,12 @@ class Traverser:
             for paper in cited_by_papers:
                 self._register_cited_by(current_level + 1, paper, parent)
 
-            self._add_citation_count(parent, len(cited_by_papers))
+            self._add_citation_count(parent.get_id(), len(cited_by_papers))
 
     async def collect(self, start_paper: Paper, max_depth: int) -> None:
         await self.resume_collection(start_paper, max_depth)
 
-    async def resume_collection(
-        self, start_paper: Paper, max_depth: int
-    ) -> None:
+    async def resume_collection(self, start_paper: Paper, max_depth: int) -> None:
         if len(self.papers) == 0 or self.current_depth == 0:
             self.current_depth = 0
             self.papers = {}
@@ -183,7 +153,7 @@ class Traverser:
             self.logger.debug(f"Performing step {self.current_depth}")
             await self._collect_papers_for_next_level(self.current_depth)
 
-            self.save_callback(self)
+            self.save_callback()
 
     async def _get_parent_and_cited_by(
         self, parent: Paper
@@ -195,7 +165,7 @@ class Traverser:
                 # probably too many requests
                 return parent, cited_by
 
-            if self.idle_time > 0:
+            if self.idle_time > 0 and self._wait_before_request(parent):
                 self.logger.info(
                     f"Waiting random time [0..{self.idle_time})s for polite api "
                     f"access before request for {parent}"
@@ -203,7 +173,12 @@ class Traverser:
                 await sleep(self.idle_time * random())
 
             try:
-                new_cited_by = await self._get_cited_by(parent, offset, self.page_size)
+                limit = (
+                    self.max_citations_per_paper - offset
+                    if self.max_citations_per_paper < offset + self.page_size
+                    else self.page_size
+                )
+                new_cited_by = await self._get_cited_by(parent, offset, limit)
                 self._error_count = 0
 
                 if len(new_cited_by) == 0:
@@ -214,6 +189,9 @@ class Traverser:
                 self._error_count += 1
 
         return parent, cited_by
+
+    def _wait_before_request(self, paper: Paper) -> bool:
+        return True
 
     async def _get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
         """Get all papers that cite the `paper` from the parameters."""
@@ -292,8 +270,8 @@ class Traverser:
         graph.add_node(
             paper.get_id(),
             label=str(paper),
-            size=_get_size(paper),
-            color=hsv_to_hex(*_get_hsv(paper.year, year_range)),
+            size=get_size(paper),
+            color=hsv_to_hex(*get_hsv(paper.year, year_range)),
         )
 
     @staticmethod
@@ -306,7 +284,7 @@ class Traverser:
         parent: Paper,
         graph: NXGraph,
         year_range: Tuple[float, float],
-    ) -> int:
+    ) -> None:
         for node in traverser.papers.values():
             if node.parent_id == parent.get_id():
                 Traverser._add_nx_graph_node(graph, node.paper, year_range)

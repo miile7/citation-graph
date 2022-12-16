@@ -1,6 +1,6 @@
 from logging import getLogger
 from requests import get
-from typing import Dict, Generator, List, TypedDict, Union, cast
+from typing import Dict, Generator, List, Optional, TypedDict, Union, cast
 
 from citation_graph.paper import AuthorName, IdType, Paper
 from citation_graph.traverser import Traverser
@@ -26,6 +26,7 @@ class _ResultJSONPaper(TypedDict):
     title: str
     year: int
     authors: List[_ResultJSONAuthors]
+    citationCount: int
 
 
 class _ResultJSONData(TypedDict):
@@ -41,15 +42,16 @@ class _ResultJSON(TypedDict):
 class SematicScholarTraverser(Traverser):
     paper_base_url = "https://www.semanticscholar.org/paper"
     url = "https://api.semanticscholar.org/graph/v1/paper"
-    params = {"fields": ",".join(("title", "year", "authors", "externalIds"))}
+    params = {
+        "fields": ",".join(("title", "year", "authors", "externalIds", "citationCount"))
+    }
 
     def __init__(self, *args, **kwargs) -> None:
-        super().__init__(
-            "semanticscholar.org",
-            *args,
-            idle_time=5 * 60 / 100,  # 100 requests per five minutes
-            **kwargs,
-        )
+        if "idle_time" not in kwargs:
+            kwargs["idle_time"] = (5 * 60 / 100,)  # 100 requests per five minutes
+
+        super().__init__(*args, **kwargs)
+        self.name = "semanticscholar.org"
 
         self.logger = getLogger(
             "citation_graph.semantic_scholar.SemanticScholarTraverser"
@@ -58,7 +60,9 @@ class SematicScholarTraverser(Traverser):
     def get_paper_url(self, paper: Paper) -> str:
         return self.get_paper_url_by_id(paper.get_id_type(), paper.get_raw_id())
 
-    def get_paper_url_by_id(self, id_type: IdType, id: Union[str, int, None]) -> str:
+    def get_paper_url_by_id(
+        self, id_type: Optional[IdType], id: Union[str, int, None]
+    ) -> str:
         if id is None:
             raise KeyError("Ids of type None are invalid")
 
@@ -84,7 +88,7 @@ class SematicScholarTraverser(Traverser):
         if not isinstance(r, dict):
             raise ValueError(f"Could not find information for paper with id {id}")
 
-        return self._parse_json_result_paper(r)
+        return self._parse_json_result_paper(cast(_ResultJSONPaper, r))
 
     def _parse_json_result_paper(self, result: _ResultJSONPaper) -> Paper:
         try:
@@ -94,6 +98,7 @@ class SematicScholarTraverser(Traverser):
                 result["title"],
             )
             paper.url = f"{self.paper_base_url}/{result['paperId']}"
+            paper.meta[self.name] = {"citation_count": result["citationCount"]}
         except KeyError:
             raise ValueError(f"Cannot parse json {result}")
 
@@ -112,7 +117,26 @@ class SematicScholarTraverser(Traverser):
     def get_citing_papers_url(self, paper: Paper) -> str:
         return f"{self.get_paper_url(paper)}/citations"
 
+    def is_paper_cited_by_database(self, paper: Paper) -> bool:
+        return (
+            self.name not in paper.meta
+            or "citation_count" not in paper.meta[self.name]
+            or paper.meta[self.name]["citation_count"] != 0
+        )
+
+    def _wait_before_request(self, paper: Paper) -> bool:
+        if not self.is_paper_cited_by_database(paper):
+            return False
+        return True
+
     async def _get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
+        if not self.is_paper_cited_by_database(paper):
+            self.logger.info(
+                f"Skipping request of {paper}, database does not have any citations, "
+                "this information was already received when fetching the paper."
+            )
+            return []
+
         try:
             url = self.get_citing_papers_url(paper)
         except KeyError:
@@ -129,7 +153,7 @@ class SematicScholarTraverser(Traverser):
         r = result.json()
         if (
             not isinstance(r, dict)
-            or not "data" in r
+            or "data" not in r
             or not isinstance(r["data"], list)
         ):
             raise ValueError(f"Cannot parser the returned json data: \n\n{result.text}")
