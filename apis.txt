@@ -1,2 +1,7 @@
 Crossref - Not yet implemented
 semanticscholar
+Academic Knowledge API
+https://api.base-search.net/
+https://core.ac.uk/services/api
+https://dev.elsevier.com/
+http://developers.amctheatres.com/

@@ -4,7 +4,21 @@ from os import name, environ, path
 from pathlib import Path
 from re import compile
 from sys import platform
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
+
+if TYPE_CHECKING:
+    from _typeshed import SupportsDunderLT, SupportsDunderGT
 
 from citation_graph.paper import Paper
 
@@ -67,11 +81,16 @@ def hsv_to_hex(h: float, s: float, v: float) -> str:
     return "#{:02X}{:02X}{:02X}".format(int(r * 255), int(g * 255), int(b * 255))
 
 
-def get_colormap(values: List[int]) -> Dict[int, str]:
-    color_map: Dict[int, str] = {}
+T = TypeVar("T")
+
+
+def get_colormap(values: List[T]) -> Dict[T, str]:
+    color_map: Dict[T, str] = {}
     m = len(values)
 
-    for i, value in enumerate(sorted(values)):
+    for i, value in enumerate(
+        sorted(values, key=lambda v: v if isinstance(v, (int, float)) else -1)
+    ):
         color_map[value] = hsv_to_hex(*get_hsv(i, (0, m)))
 
     return color_map

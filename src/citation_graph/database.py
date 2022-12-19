@@ -1,0 +1,117 @@
+from collections import defaultdict
+from dataclasses import dataclass, field
+from logging import Logger
+from typing import DefaultDict, Dict, List, Literal, Optional, TypedDict, Union
+
+from citation_graph.paper import IdType, Paper
+
+
+REQUEST_TIMEOUT = 10
+
+
+CitationCache = DefaultDict[Optional[str], List[str]]
+
+PaperCache = Dict[Optional[str], Paper]
+
+
+class DatabaseJsonRepresentation(TypedDict):
+    __type: Literal["Database"]
+    name: str
+    citation_cache: CitationCache
+    paper_cache: PaperCache
+
+
+@dataclass
+class Database:
+    name: str
+    logger: Logger
+    idle_time: float
+    use_pagination: bool
+    page_size: int
+    error_count: int
+    citation_cache: CitationCache = field(default_factory=lambda: defaultdict(list))
+    paper_cache: PaperCache = field(default_factory=dict)
+
+    def has_all_citation_cache_entries(
+        self, paper: Paper, offset: int, limit: int
+    ) -> bool:
+        return len(self.get_citation_cache_entries(paper, offset, limit)) == limit
+
+    def get_citation_cache_entries(
+        self, paper: Paper, offset: int, limit: int
+    ) -> List[Paper]:
+        paper_id = paper.get_id()
+        if paper_id is not None:
+            ids = self.citation_cache[paper_id][offset:limit]
+            self.logger.debug(
+                f"Found {len(ids)} entries in the cache for {paper} for offset {offset}"
+                f" and limit {limit}"
+            )
+            return [self.paper_cache[id_] for id_ in ids]
+
+        return []
+
+    def cache_paper(self, paper: Paper) -> None:
+        self.logger.debug(f"Caching paper {paper}")
+        self.paper_cache[paper.get_id()] = paper
+
+    def cache_papers(self, citations: List[Paper]) -> None:
+        self.logger.debug(f"Caching papers: {', '.join((str(p) for p in citations))}")
+        self.paper_cache.update({c.get_id(): c for c in citations})
+
+    def cache_citations(self, parent: Paper, citations: List[Paper]) -> None:
+        paper_id = parent.get_id()
+        if paper_id is not None:
+            self.logger.debug(
+                f"Writing {len(citations)} citations of {parent} to cache"
+            )
+            self.citation_cache[paper_id] += list(
+                filter(None, (c.get_id() for c in citations))
+            )
+            self.cache_papers(citations)
+
+    def wait_before_request(self, paper: Paper, offset: int, limit: int) -> bool:
+        return not self.has_all_citation_cache_entries(paper, offset, limit)
+
+    async def get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
+        """Get all papers that cite the `paper` from the parameters."""
+        citations: List[Paper] = []
+        cache_citations = self.get_citation_cache_entries(paper, offset, limit)
+
+        self.logger.info(f"Loading {len(cache_citations)} citations from cache")
+
+        if len(cache_citations) == limit:
+            return cache_citations
+        else:
+            self.logger.debug(f"Extending data from cache with new data")
+            citations = await self._get_cited_by(
+                paper, offset - len(cache_citations), limit
+            )
+
+            self.cache_citations(paper, citations)
+
+        return cache_citations + citations
+
+    async def _get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
+        raise NotImplementedError()
+
+    async def get_paper(self, id_type: IdType, id_: Union[str, int]) -> Paper:
+        """Get the paper object for the given `id_`."""
+        paper_id = Paper.create_id(id_type, id_)
+        if paper_id in self.paper_cache:
+            return self.paper_cache[paper_id]
+
+        paper = await self._get_paper(id_type, id_)
+        self.cache_paper(paper)
+        return paper
+
+    async def _get_paper(self, id_type: IdType, id: Union[str, int]) -> Paper:
+        raise NotImplementedError()
+
+    def toJson(self) -> DatabaseJsonRepresentation:
+        return {
+            "__type": "Database",
+            "name": self.name,
+            "citation_cache": self.citation_cache,
+            "paper_cache": self.paper_cache,
+        }

@@ -1,16 +1,18 @@
-from asyncio import gather, run as run_async
+from asyncio import run as run_async
 from argparse import ArgumentParser, Namespace
 from logging import DEBUG, INFO, WARNING, basicConfig, getLogger
+from pathlib import Path
 from networkx import Graph  # type: ignore[import]
 from pyvis.network import Network  # type: ignore[import]
-from typing import List, Optional, Type, TypedDict
+from typing import List, Optional, TypedDict
 from typing_extensions import Unpack
-from citation_graph.caching import is_cached, load_cached, save_cache
+from citation_graph.cache_manager import CacheManager
+from citation_graph.database import Database
 
-from citation_graph.paper import Paper
-from citation_graph.semantic_scholar import SematicScholarTraverser
+from citation_graph.paper import ID_TYPES, PAPER_ID_TYPE_SEPARATOR, IdType, Paper
+from citation_graph.semantic_scholar import SematicScholarDatabase
 from citation_graph.traverser import Traverser
-from citation_graph.utils import SLUG, get_valid_filename
+from citation_graph.utils import SLUG, get_cache_dir, get_valid_filename
 from citation_graph.version import get_version
 
 
@@ -21,19 +23,26 @@ DEFAULT_LOG_LEVEL = WARNING
 DEFAULT_MAX_DEPTH = 1
 DEFAULT_POLITENESS_FACTOR = 1
 DEFAULT_MAX_CITATIONS_PER_PAPER = 300
+DEFAULT_MAX_REQUEST_ERRORS = 10
+DEFAULT_ID_TYPE = "doi"
 
-TRAVERSER: List[Type[Traverser]] = [SematicScholarTraverser]
+
+DATABASES: List[Database] = [SematicScholarDatabase()]
 
 
 logger = getLogger(SLUG)
 
 
 class ParserArgs(TypedDict, total=False):
-    depth: int
+    max_depth: int
     clear_cache: bool
-    doi: str
+    id_type: IdType
+    id: str
     max_citations_per_paper: int
     politeness_factor: float
+    max_request_errors: int
+    excluded_papers: List[str]
+    cache_path: Path
 
 
 def visualize(graph: Graph, filename: str) -> None:
@@ -48,60 +57,45 @@ def visualize(graph: Graph, filename: str) -> None:
     net.show(filename)
 
 
-def save_callback(
-    start_paper: Optional[Paper], traversers: List[Traverser], args: Namespace
-) -> None:
-    # This function exists for mypy only, start_paper is never None, otherwise the
-    # program aborts with an error before this function is ever executed
-    if start_paper is not None:
-        save_cache(start_paper, traversers, args)
-
-
 async def run(args: Namespace) -> None:
     start_paper: Optional[Paper] = None
-    traversers: List[Traverser] = []
-    for traverser_class in TRAVERSER:
-        traverser = traverser_class(
-            save_callback=lambda: save_callback(start_paper, traversers, args),
-            max_citations_per_paper=args.max_citations_per_paper,
-            politeness_factor=args.politeness_factor,
-        )
-        traversers.append(traverser)
-
+    for database in DATABASES:
         if start_paper is None:
-            try:
-                start_paper = await traverser.get_paper("doi", args.doi)
-            except ValueError:
-                pass
+            start_paper = await database.get_paper(args.id_type, args.id)
 
     if start_paper is None:
-        raise Exception(f"Could not find any paper for DOI {args.doi}")
+        raise Exception(f"Could not find any paper for {args.id_type} {args.id}")
 
     logger.info(f"Found root paper to be {start_paper}")
 
-    if args.clear_cache:
-        logger.debug("Ignoring cache because of --clear-cache")
-    elif is_cached(start_paper):
-        load_cached(start_paper, traversers)
+    logger.info("Setting up cache file")
+    with CacheManager(
+        start_paper, DATABASES, args, not args.clear_cache, args.cache_path
+    ) as cache_manager:
+        logger.info("Starting collection")
+        traverser = Traverser(
+            start_paper,
+            cache_manager.save,
+            cache_manager.databases,
+            args.max_citations_per_paper,
+            args.politeness_factor,
+            args.max_request_errors,
+            []
+            if args.excluded_papers is None
+            else [Paper.partial_from_string(e) for e in args.excluded_papers],
+        )
 
-    tasks = []
-    for traverser in traversers:
-        logger.info(f"Kick off collection from {traverser}")
-        tasks.append(traverser.resume_collection(start_paper, args.max_depth))
+        await traverser.collect(args.max_depth)
 
-        logger.debug("Waiting for all traversers to complete.")
-        await gather(*tasks)
-
-    for traverser in traversers:
-        logger.info(f"Visualizing result of {traverser}")
+        logger.info(f"Visualizing result of {start_paper}")
         visualize(
             Traverser.to_nx_graph(traverser),
-            get_valid_filename(f"{start_paper} - {traverser.name}.html"),
+            get_valid_filename(f"{start_paper}.html"),
         )
 
 
 def get_arg_parser() -> ArgumentParser:
-    parser = ArgumentParser(prog=NAME)
+    parser = ArgumentParser(prog=SLUG, description=f"{NAME} - Create a citation graph")
 
     parser.add_argument(
         "--version", "-V", action="version", version=f"{NAME}, version {get_version()}"
@@ -144,6 +138,17 @@ def get_arg_parser() -> ArgumentParser:
         default=False,
     )
     parser.add_argument(
+        "--cache-path",
+        "-w",
+        dest="cache_path",
+        help=(
+            "The path to load the cache file from and to save it to, default is "
+            f"{get_cache_dir()}"
+        ),
+        type=Path,
+        default=get_cache_dir()
+    )
+    parser.add_argument(
         "--max-citations-per-paper",
         "-m",
         dest="max_citations_per_paper",
@@ -167,8 +172,50 @@ def get_arg_parser() -> ArgumentParser:
         type=float,
         default=DEFAULT_POLITENESS_FACTOR,
     )
+    parser.add_argument(
+        "--max-request-errors",
+        "-e",
+        dest="max_request_errors",
+        help=(
+            "The maximum number of subsequent errors when requesting paper citations. "
+            "If more than this specified amount of errors occurs, a (temporary) block "
+            "of requests is assumed by the database due to too many requests. The "
+            f"default is {DEFAULT_MAX_REQUEST_ERRORS}"
+        ),
+        type=int,
+        default=DEFAULT_MAX_REQUEST_ERRORS,
+    )
+    parser.add_argument(
+        "--exclude-papers",
+        "-x",
+        dest="excluded_papers",
+        help=(
+            "Define papers to exclude from the result set, including intermediate "
+            "result sets. This allows to prevent fetching citations of papers that are "
+            "not relevant for the current research and therefore narrow down the "
+            "selection. To define papers, use any id type followed by the id, separated"
+            f" by '{PAPER_ID_TYPE_SEPARATOR}', like so: "
+            f"{{{'|'.join(ID_TYPES)}}}{PAPER_ID_TYPE_SEPARATOR}PAPER_ID"
+        ),
+        type=str,
+        nargs="*",
+    )
 
-    parser.add_argument("doi", help="The DOI of the paper to use as the root", type=str)
+    parser.add_argument(
+        "id_type",
+        nargs="?",
+        help=f"The id type, default is {DEFAULT_ID_TYPE}",
+        choices=ID_TYPES,
+        default=DEFAULT_ID_TYPE,
+    )
+    parser.add_argument(
+        "id",
+        help=(
+            f"The id of the paper to use as the root, by default an {DEFAULT_ID_TYPE}"
+            " is assumed, this can be changed with the ID_TYPE parameter"
+        ),
+        type=str,
+    )
 
     return parser
 

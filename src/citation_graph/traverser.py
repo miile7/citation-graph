@@ -1,6 +1,6 @@
 from asyncio import sleep
 from dataclasses import dataclass
-from logging import getLogger
+from logging import DEBUG, getLogger
 from networkx import Graph as NXGraph  # type: ignore[import]
 from random import random
 from typing import (
@@ -14,10 +14,10 @@ from typing import (
     Optional,
     Tuple,
     TypeVar,
-    Union,
 )
+from citation_graph.database import Database
 
-from citation_graph.paper import IdType, Paper
+from citation_graph.paper import Paper
 from citation_graph.utils import get_colormap, get_size
 
 
@@ -41,43 +41,46 @@ Graph = _GraphNode
 
 
 class Traverser:
-    name: str
-    save_callback: Callable[[], Any]
-    page_size: int
+    start_paper: Paper
+    save_callback: Callable[["Database"], Any]
     max_citations_per_paper: int
-    use_pagination: bool
-    idle_time: float  # idle time between two requests in s
     error_count_threshold: int
+    politeness_factor: float
+    databases: List[Database]
 
     max_depth: int
-    start_paper: Paper
     papers: Dict[str, _PaperNode]
     current_depth: int
     _error_count: int
+    exclude_papers: List[Paper]
 
     def __init__(
         self,
-        save_callback: Callable[[], Any],
-        page_size: int = 100,
+        start_paper: Paper,
+        save_callback: Callable[["Database"], Any],
+        databases: List[Database],
         max_citations_per_paper: int = 300,
         politeness_factor: float = 1,
-        idle_time: float = 0.5,
         error_count_threshold: int = 10,
+        exclude_papers: List[Paper] = [],
     ) -> None:
         self.logger = getLogger("citation_graph.traverser.Traverser")
         self.logger.debug("Initialize traverser object")
 
-        self.papers = {}
+        self.databases = databases
+        self.start_paper = start_paper
 
         self.save_callback = save_callback
-        self.page_size = page_size
         self.max_citations_per_paper = max_citations_per_paper
-        self.use_pagination = True
-        self.idle_time = idle_time * politeness_factor
+        self.politeness_factor = politeness_factor
         self.error_count_threshold = error_count_threshold
+        self.exclude_papers = exclude_papers
 
-    def __str__(self) -> str:
-        return f"Traverser{{{self.name}}}"
+        self.reset()
+
+    def reset(self) -> None:
+        self.papers = {}
+        self._add_paper_node(0, self.start_paper, None)
 
     def _add_paper_node(
         self, level: int, paper: Paper, parent_id: Optional[str]
@@ -126,79 +129,85 @@ class Traverser:
 
             self._add_citation_count(parent.get_id(), len(cited_by_papers))
 
-    async def collect(self, start_paper: Paper, max_depth: int) -> None:
-        await self.resume_collection(start_paper, max_depth)
+    async def collect(self, max_depth: int) -> None:
+        self.current_depth = 0
 
-    async def resume_collection(self, start_paper: Paper, max_depth: int) -> None:
-        if len(self.papers) == 0 or self.current_depth == 0:
-            self.current_depth = 0
-            self.papers = {}
-            self._add_paper_node(0, start_paper, None)
-
-            self.logger.debug(
-                f"Collecting citations until depth of {max_depth} for paper "
-                f"{start_paper}."
-            )
-        else:
-            self.logger.debug(
-                f"Resuming collecting citations from depth {self.current_depth} until "
-                f"depth of {max_depth} for paper {start_paper}."
-            )
+        self.logger.debug(
+            f"Collecting citations until depth of {max_depth} for paper "
+            f"{self.start_paper}."
+        )
 
         self.max_depth = max_depth
-        self.start_paper = start_paper
         self._error_count = 0
 
-        for self.current_depth in range(self.current_depth, self.max_depth):
-            self.logger.debug(f"Performing step {self.current_depth}")
+        for self.current_depth in range(0, self.max_depth):
+            self.logger.info(f"Loading level {self.current_depth}")
             await self._collect_papers_for_next_level(self.current_depth)
-
-            self.save_callback()
 
     async def _get_parent_and_cited_by(
         self, parent: Paper
     ) -> Tuple[Paper, List[Paper]]:
         cited_by: List[Paper] = []
+        tasks: List[Coroutine[Any, Any, List[Paper]]] = []
 
-        for offset in range(0, self.max_citations_per_paper, self.page_size):
+        for database in self.databases:
+            tasks.append(self._get_cited_by_from_database(parent, database))
+
+        for task in tasks:
+            cited_by += filter(
+                lambda t: t not in cited_by and t not in self.exclude_papers, await task
+            )
+
+        return parent, cited_by
+
+    async def _get_cited_by_from_database(
+        self, parent: Paper, database: Database
+    ) -> List[Paper]:
+        cited_by: List[Paper] = []
+        for offset in range(0, self.max_citations_per_paper, database.page_size):
             if self._error_count > self.error_count_threshold:
                 # probably too many requests
-                return parent, cited_by
+                return cited_by
 
-            if self.idle_time > 0 and self._wait_before_request(parent):
+            limit = (
+                self.max_citations_per_paper - offset
+                if self.max_citations_per_paper < offset + database.page_size
+                else database.page_size
+            )
+
+            idle_time = database.idle_time * self.politeness_factor * random()
+
+            if idle_time > 0 and database.wait_before_request(parent, offset, limit):
                 self.logger.info(
-                    f"Waiting random time [0..{self.idle_time})s for polite api "
-                    f"access before request for {parent}"
+                    f"Waiting random time {idle_time}s for polite api access before "
+                    f"request for {parent}"
                 )
-                await sleep(self.idle_time * random())
+                await sleep(idle_time)
+            elif self.logger.level <= DEBUG:
+                msgs = []
+                if idle_time == 0:
+                    msgs.append("idle time is zero")
+                if not database.wait_before_request(parent, offset, limit):
+                    msgs.append(f"database '{database.name}' signals not to wait")
+
+                self.logger.debug(
+                    f"Skipping waiting time, {' and '.join(msgs)}"
+                )
 
             try:
-                limit = (
-                    self.max_citations_per_paper - offset
-                    if self.max_citations_per_paper < offset + self.page_size
-                    else self.page_size
-                )
-                new_cited_by = await self._get_cited_by(parent, offset, limit)
+                new_cited_by = await database.get_cited_by(parent, offset, limit)
                 self._error_count = 0
 
                 if len(new_cited_by) == 0:
                     break
                 else:
                     cited_by += new_cited_by
+
+                self.save_callback(database)
             except Exception:
                 self._error_count += 1
 
-        return parent, cited_by
-
-    def _wait_before_request(self, paper: Paper) -> bool:
-        return True
-
-    async def _get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
-        """Get all papers that cite the `paper` from the parameters."""
-        raise NotImplementedError()
-
-    async def get_paper(self, id_type: IdType, id: Union[str, int]) -> Paper:
-        raise NotImplementedError()
+        return cited_by
 
     @staticmethod
     def to_list(traverser: "Traverser") -> List[Paper]:
@@ -279,7 +288,7 @@ class Traverser:
                 f"<p>{paper.year}, {paper.get_authors_str()}</p>"
                 f"<p><a href='{paper.url}'>{paper.url}</a></p>"
                 # f"<p>{paper.abstract}</p>"
-            )
+            ),
         )
 
     @staticmethod

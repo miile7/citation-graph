@@ -1,9 +1,9 @@
 from logging import getLogger
 from requests import get
-from typing import Dict, Generator, List, Optional, TypedDict, Union, cast
+from typing import Any, Dict, Generator, List, Optional, TypedDict, Union, cast
+from citation_graph.database import REQUEST_TIMEOUT, Database
 
 from citation_graph.paper import AuthorName, IdType, Paper
-from citation_graph.traverser import Traverser
 
 
 class _ResultJSONExternalIds(TypedDict, total=False):
@@ -39,23 +39,30 @@ class _ResultJSON(TypedDict):
     data: List[_ResultJSONData]
 
 
-class SematicScholarTraverser(Traverser):
+class SematicScholarDatabase(Database):
     paper_base_url = "https://www.semanticscholar.org/paper"
-    url = "https://api.semanticscholar.org/graph/v1/paper"
+    api_base_url = "https://api.semanticscholar.org/graph/v1/paper"
     params = {
         "fields": ",".join(("title", "year", "authors", "externalIds", "citationCount"))
     }
 
-    def __init__(self, *args, **kwargs) -> None:
-        if "idle_time" not in kwargs:
-            kwargs["idle_time"] = 5 * 60 / 100  # 100 requests per five minutes
-
-        super().__init__(*args, **kwargs)
-        self.name = "semanticscholar.org"
-
-        self.logger = getLogger(
+    def __init__(self) -> None:
+        logger = getLogger(
             "citation_graph.semantic_scholar.SemanticScholarTraverser"
         )
+        super().__init__(
+            "semanticscholar.org",
+            logger,
+            5 * 60 / 100,  # 100 requests per five minutes
+            True,
+            100,
+            10
+        )
+
+    def wait_before_request(self, paper: Paper, offset: int, limit: int) -> bool:
+        if not self.is_paper_cited_by_database(paper):
+            return False
+        return super().wait_before_request(paper, offset, limit)
 
     def get_paper_url(self, paper: Paper) -> str:
         return self.get_paper_url_by_id(paper.get_id_type(), paper.get_raw_id())
@@ -76,13 +83,13 @@ class SematicScholarTraverser(Traverser):
             raise KeyError(
                 "Cannot find an identifier that is supported by the current database."
             )
-        return f"{self.url}/{url_id}"
+        return f"{self.api_base_url}/{url_id}"
 
-    async def get_paper(self, id_type: IdType, id: Union[str, int]) -> Paper:
+    async def _get_paper(self, id_type: IdType, id: Union[str, int]) -> Paper:
         url = self.get_paper_url_by_id(id_type, id)
         self.logger.info(f"Fetching paper for {id_type} {id} by url {url}")
 
-        result = get(url, self.params)
+        result = get(url, self.params, timeout=REQUEST_TIMEOUT)
         r = result.json()
 
         if not isinstance(r, dict):
@@ -93,7 +100,7 @@ class SematicScholarTraverser(Traverser):
     def _parse_json_result_paper(self, result: _ResultJSONPaper) -> Paper:
         try:
             paper = Paper(
-                list(SematicScholarTraverser._parse_author_names(result["authors"])),
+                list(SematicScholarDatabase._parse_author_names(result["authors"])),
                 result["year"],
                 result["title"],
             )
@@ -124,11 +131,6 @@ class SematicScholarTraverser(Traverser):
             or paper.meta[self.name]["citation_count"] != 0
         )
 
-    def _wait_before_request(self, paper: Paper) -> bool:
-        if not self.is_paper_cited_by_database(paper):
-            return False
-        return True
-
     async def _get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
         if not self.is_paper_cited_by_database(paper):
             self.logger.info(
@@ -145,10 +147,17 @@ class SematicScholarTraverser(Traverser):
             )
             return []
 
+        params: Dict[str, Any] = self.params.copy()
+        params["offset"] = offset
+        # load more for caching, this is the same request and does not have any
+        # penalty from the database concerning requests
+        params["limit"] = max(limit, self.page_size)
+
         self.logger.info(
-            f"Fetching results ({offset}..{offset + limit}) for {paper} from {url}"
+            f"Fetching results ({offset}..{offset + limit}) for {paper} from {url} "
+            f"(actually loading {params['limit']} results for cache"
         )
-        result = get(url, self.params)
+        result = get(url, params, timeout=REQUEST_TIMEOUT)
 
         r = result.json()
         if (
@@ -163,6 +172,16 @@ class SematicScholarTraverser(Traverser):
         cited_by_papers = self._parse_json_result_citing_paper(cast(_ResultJSON, r))
 
         self.logger.debug(f"Found {len(cited_by_papers)} citations of {paper}")
+
+        if len(cited_by_papers) > limit:
+            self.logger.debug(
+                f"Caching last {len(cited_by_papers) - limit} elements for later use, "
+                f"returning only the first {limit} elements as requested."
+            )
+            cache_only = cited_by_papers[limit:]
+            self.cache_citations(paper, cache_only)
+
+            cited_by_papers = cited_by_papers[:limit]
 
         return cited_by_papers
 

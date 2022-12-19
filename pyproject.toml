@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "citation_graph"
-version = "1.1.0"
+version = "1.2.0"
 description = ""
 authors = ["miile7"]
 readme = "README.md"
@@ -12,6 +12,7 @@ requests = "^2.28.1"
 types-requests = "^2.28.11.5"
 pyvis = "^0.3.1"
 networkx = "^2.8.8"
+levenshtein = "^0.20.8"
 
 [tool.poetry.group.dev.dependencies]
 black = "*"
