@@ -78,7 +78,6 @@ class CacheManager(AbstractContextManager):
     args: Namespace
     load_cache: bool
 
-    cache_dir: Path
     cache_file_path: Path
     logger: Logger
 
@@ -91,20 +90,30 @@ class CacheManager(AbstractContextManager):
         databases: List[Database],
         args: Namespace,
         load_cache_on_startup: bool,
-        cache_dir: Optional[Path] = None,
+        cache_path: Optional[Path] = None,
     ) -> None:
-        if isinstance(cache_dir, Path):
-            self.cache_dir = cache_dir
+        cache_dir: Path
+        if isinstance(cache_path, Path):
+            if cache_path.is_dir():
+                cache_dir = cache_path
+                self.cache_file_path = cache_path / self.get_cache_file_name(
+                    self.start_paper
+                )
+            else:
+                cache_dir = cache_path.parent
+                self.cache_file_path = cache_path
         else:
-            self.cache_dir = get_cache_dir()
+            cache_dir = get_cache_dir()
+            self.cache_file_path = get_cache_dir() / self.get_cache_file_name(
+                self.start_paper
+            )
 
-        if not self.cache_dir.exists():
-            self.cache_dir.mkdir(0o777, True, True)
+        if not cache_dir.exists():
+            cache_dir.mkdir(0o777, True, True)
 
         self.start_paper = start_paper
         self.databases = databases
         self.args = args
-        self.cache_file_path = self.get_cache_dir_for_paper(self.start_paper)
         self.logger = getLogger("citation_graph.cache_manager.CacheManager")
 
         self.load_cache = load_cache_on_startup
@@ -145,9 +154,9 @@ class CacheManager(AbstractContextManager):
         self.worker.stop()
         return False  # return False to not suppress any exceptions
 
-    def get_cache_dir_for_paper(self, paper: Paper) -> Path:
+    def get_cache_file_name(self, paper: Paper) -> str:
         paper_id = str(paper.get_raw_id()) or "{:x}".format(id(paper))
-        return self.cache_dir / f"{get_valid_filename(paper_id)}.cache.json"
+        return f"{get_valid_filename(paper_id)}.cache.json"
 
     def has_cache_file(self) -> bool:
         if not self.cache_file_path.exists():

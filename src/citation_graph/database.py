@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
-from logging import Logger
+from logging import DEBUG, Logger
 from typing import DefaultDict, Dict, List, Literal, Optional, TypedDict, Union
 
 from citation_graph.paper import IdType, Paper
@@ -9,7 +9,13 @@ from citation_graph.paper import IdType, Paper
 REQUEST_TIMEOUT = 10
 
 
-CitationCache = DefaultDict[Optional[str], List[str]]
+class _CitationDictEntry(TypedDict):
+    papers: list
+    offset: int
+    limit: int
+
+
+CitationCache = DefaultDict[Optional[str], _CitationDictEntry]
 
 PaperCache = Dict[Optional[str], Paper]
 
@@ -21,6 +27,10 @@ class DatabaseJsonRepresentation(TypedDict):
     paper_cache: PaperCache
 
 
+def _citation_cache_entry_factory() -> _CitationDictEntry:
+    return {"papers": [], "offset": 0, "limit": 0}
+
+
 @dataclass
 class Database:
     name: str
@@ -29,20 +39,28 @@ class Database:
     use_pagination: bool
     page_size: int
     error_count: int
-    citation_cache: CitationCache = field(default_factory=lambda: defaultdict(list))
+    citation_cache: CitationCache = field(
+        default_factory=lambda: defaultdict(_citation_cache_entry_factory)
+    )
     paper_cache: PaperCache = field(default_factory=dict)
 
     def has_all_citation_cache_entries(
         self, paper: Paper, offset: int, limit: int
     ) -> bool:
-        return len(self.get_citation_cache_entries(paper, offset, limit)) == limit
+        paper_id = paper.get_id()
+        if paper_id is None:
+            return False
+        return (
+            self.citation_cache[paper_id]["offset"] <= offset
+            and self.citation_cache[paper_id]["limit"] >= limit
+        )
 
     def get_citation_cache_entries(
         self, paper: Paper, offset: int, limit: int
     ) -> List[Paper]:
         paper_id = paper.get_id()
         if paper_id is not None:
-            ids = self.citation_cache[paper_id][offset:limit]
+            ids = self.citation_cache[paper_id]["papers"][offset : offset + limit]
             self.logger.debug(
                 f"Found {len(ids)} entries in the cache for {paper} for offset {offset}"
                 f" and limit {limit}"
@@ -59,15 +77,36 @@ class Database:
         self.logger.debug(f"Caching papers: {', '.join((str(p) for p in citations))}")
         self.paper_cache.update({c.get_id(): c for c in citations})
 
-    def cache_citations(self, parent: Paper, citations: List[Paper]) -> None:
+    def cache_citations(
+        self, parent: Paper, citations: List[Paper], offset: int, limit: int
+    ) -> None:
         paper_id = parent.get_id()
         if paper_id is not None:
             self.logger.debug(
                 f"Writing {len(citations)} citations of {parent} to cache"
             )
-            self.citation_cache[paper_id] += list(
+            self.citation_cache[paper_id]["papers"] += list(
                 filter(None, (c.get_id() for c in citations))
             )
+
+            if (
+                offset + limit < self.citation_cache[paper_id]["offset"]
+                or offset > self.citation_cache[paper_id]["limit"]
+            ):
+                # Corner case, this should never happen: The cached request is from
+                # 200-300, the current is from 0-100 (or other way around)
+                # -> 100-200 is missing
+                # -> forget 200-300, only concurrent areas can be cached
+                # This can never happen because the traverser is asking in consecutive
+                # steps starting from zero
+                self.citation_cache[paper_id]["offset"] = offset
+                self.citation_cache[paper_id]["limit"] = limit
+            else:
+                if offset < self.citation_cache[paper_id]["offset"]:
+                    self.citation_cache[paper_id]["offset"] = offset
+                if limit > self.citation_cache[paper_id]["limit"]:
+                    self.citation_cache[paper_id]["limit"] = limit
+
             self.cache_papers(citations)
 
     def wait_before_request(self, paper: Paper, offset: int, limit: int) -> bool:
@@ -76,19 +115,32 @@ class Database:
     async def get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
         """Get all papers that cite the `paper` from the parameters."""
         citations: List[Paper] = []
-        cache_citations = self.get_citation_cache_entries(paper, offset, limit)
+        cache_citations: List[Paper] = []
+        error = False
 
-        self.logger.info(f"Loading {len(cache_citations)} citations from cache")
+        try:
+            cache_citations = self.get_citation_cache_entries(paper, offset, limit)
+        except Exception as e:
+            self.logger.exception(e)
+            error = True
 
-        if len(cache_citations) == limit:
+        if len(cache_citations) > 0:
+            self.logger.info(
+                f"Loading results ({offset}..{offset + len(cache_citations)}) for "
+                f"{paper} from cache"
+            )
+        elif self.logger.level <= DEBUG:
+            self.logger.debug(f"No cached citations found for {paper}")
+
+        if not error and self.has_all_citation_cache_entries(paper, offset, limit):
             return cache_citations
         else:
             self.logger.debug(f"Extending data from cache with new data")
             citations = await self._get_cited_by(
-                paper, offset - len(cache_citations), limit
+                paper, offset + len(cache_citations), limit - len(cache_citations)
             )
 
-            self.cache_citations(paper, citations)
+            self.cache_citations(paper, citations, offset, limit)
 
         return cache_citations + citations
 

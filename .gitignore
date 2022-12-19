@@ -162,3 +162,7 @@ cython_debug/
 #.idea/
 
 /*.html
+/*.csv
+/*.cache.json
+/exclude.txt
+/todo.md

@@ -1,6 +1,6 @@
 from asyncio import sleep
 from dataclasses import dataclass
-from logging import DEBUG, getLogger
+from logging import DEBUG, LoggerAdapter, getLogger
 from networkx import Graph as NXGraph  # type: ignore[import]
 from random import random
 from typing import (
@@ -14,6 +14,7 @@ from typing import (
     Optional,
     Tuple,
     TypeVar,
+    TypedDict,
 )
 from citation_graph.database import Database
 
@@ -164,9 +165,20 @@ class Traverser:
         self, parent: Paper, database: Database
     ) -> List[Paper]:
         cited_by: List[Paper] = []
+        perform_next_request = True
         for offset in range(0, self.max_citations_per_paper, database.page_size):
+            if not perform_next_request:
+                self.logger.info(
+                    f"Skipping remaining requests for {parent}, no more citations exist"
+                )
+                break
+
             if self._error_count > self.error_count_threshold:
-                # probably too many requests
+                self.logger.warning(
+                    f"Stopping requests for {parent}, reached {self._error_count} "
+                    "errors over the last cycles. Eventually the request limit of the "
+                    "database is reached."
+                )
                 return cited_by
 
             limit = (
@@ -190,21 +202,22 @@ class Traverser:
                 if not database.wait_before_request(parent, offset, limit):
                     msgs.append(f"database '{database.name}' signals not to wait")
 
-                self.logger.debug(
-                    f"Skipping waiting time, {' and '.join(msgs)}"
-                )
+                self.logger.debug(f"Skipping waiting time, {' and '.join(msgs)}")
 
             try:
+                from_cache_only = database.has_all_citation_cache_entries(
+                    parent, offset, limit
+                )
                 new_cited_by = await database.get_cited_by(parent, offset, limit)
                 self._error_count = 0
+                perform_next_request = len(new_cited_by) >= limit
 
-                if len(new_cited_by) == 0:
-                    break
-                else:
-                    cited_by += new_cited_by
+                cited_by += new_cited_by
 
-                self.save_callback(database)
-            except Exception:
+                if not from_cache_only:
+                    self.save_callback(database)
+            except Exception as e:
+                self.logger.exception(e)
                 self._error_count += 1
 
         return cited_by
@@ -283,11 +296,20 @@ class Traverser:
             color=color_map[paper.year],
             # group=paper.year,
             year=paper.year,
+            has_citations=paper.citation_count is not None and paper.citation_count > 0,
+            # meta_citation_count=paper.meta["semanticscholar.org"]["citation_count"] > 0,
             title=(
                 f"<h3>{paper.title}</h3>"
                 f"<p>{paper.year}, {paper.get_authors_str()}</p>"
-                f"<p><a href='{paper.url}'>{paper.url}</a></p>"
                 # f"<p>{paper.abstract}</p>"
+                "<table>"
+                f"<tr><th>URL</th><td><a href='{paper.url}'>{paper.url}</a></td></tr>"
+                f"<tr><th>Id</th><td><code>{paper.get_id()}</code></td></tr>"
+                "<tr><th>Citation count</th><td>"
+                f"{paper.citation_count if paper.citation_count is not None else '?'}"
+                "</td></tr>"
+                f"<tr><th>Meta</th><td><code>{paper.meta}</code></td></tr>"
+                "</table>"
             ),
         )
 

@@ -17,9 +17,6 @@ from typing import (
     Union,
 )
 
-if TYPE_CHECKING:
-    from _typeshed import SupportsDunderLT, SupportsDunderGT
-
 from citation_graph.paper import Paper
 
 SLUG = "citation_graph"

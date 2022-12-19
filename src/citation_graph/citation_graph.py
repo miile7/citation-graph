@@ -1,17 +1,24 @@
 from asyncio import run as run_async
 from argparse import ArgumentParser, Namespace
+from csv import writer
 from logging import DEBUG, INFO, WARNING, basicConfig, getLogger
 from pathlib import Path
 from networkx import Graph  # type: ignore[import]
 from pyvis.network import Network  # type: ignore[import]
-from typing import List, Optional, TypedDict
+from typing import Iterable, List, Optional, TypedDict
 from typing_extensions import Unpack
 from citation_graph.cache_manager import CacheManager
 from citation_graph.database import Database
 
-from citation_graph.paper import ID_TYPES, PAPER_ID_TYPE_SEPARATOR, IdType, Paper
+from citation_graph.paper import (
+    ID_TYPES,
+    PAPER_ID_TYPE_SEPARATOR,
+    IdType,
+    Paper,
+    PAPER_ID_LIST_FILE_COMMENT_CHAR,
+)
 from citation_graph.semantic_scholar import SematicScholarDatabase
-from citation_graph.traverser import Traverser
+from citation_graph.traverser import _PaperNode, Traverser
 from citation_graph.utils import SLUG, get_cache_dir, get_valid_filename
 from citation_graph.version import get_version
 
@@ -25,6 +32,7 @@ DEFAULT_POLITENESS_FACTOR = 1
 DEFAULT_MAX_CITATIONS_PER_PAPER = 300
 DEFAULT_MAX_REQUEST_ERRORS = 10
 DEFAULT_ID_TYPE = "doi"
+CSV_DELIMITER = ";"
 
 
 DATABASES: List[Database] = [SematicScholarDatabase()]
@@ -43,6 +51,10 @@ class ParserArgs(TypedDict, total=False):
     max_request_errors: int
     excluded_papers: List[str]
     cache_path: Path
+    name: str
+    create_list: bool
+    create_graph: bool
+    list_file_name: Optional[str]
 
 
 def visualize(graph: Graph, filename: str) -> None:
@@ -55,6 +67,55 @@ def visualize(graph: Graph, filename: str) -> None:
     )
     net.from_nx(graph)
     net.show(filename)
+
+
+def write_list(nodes: Iterable[_PaperNode], filename: str) -> None:
+    with open(filename, "w", encoding="utf-8", newline="") as f:
+        w = writer(f, delimiter=CSV_DELIMITER)
+        w.writerow((
+            "Depth",
+            "Parent id",
+            "Id",
+            "Authors",
+            "Title",
+            "Year",
+            "Citation count (Actually found)",
+            "Url",
+            "Received citation count",
+            "Meta"
+        ))
+
+        for node in sorted(nodes, key=lambda n: n.depth):
+            paper = node.paper
+            w.writerow((
+                node.depth,
+                node.parent_id,
+                paper.get_id(),
+                paper.get_authors_str(short=False),
+                paper.title,
+                paper.year,
+                paper.citation_count,
+                paper.url,
+                paper.temp_citation_count,
+                paper.meta
+            ))
+
+
+def get_excluded_papers(excluded_papers: Optional[List[str]]) -> List[Paper]:
+    if excluded_papers is None:
+        return []
+
+    papers = []
+    for excluded_paper in excluded_papers:
+        try:
+            parsed_paper = Paper.partial_from_string(excluded_paper)
+            papers.append(parsed_paper)
+        except ValueError:
+            paper_path = Path(excluded_paper)
+            if paper_path.exists():
+                papers += list(Paper.from_file(paper_path, logger))
+
+    return papers
 
 
 async def run(args: Namespace) -> None:
@@ -80,18 +141,28 @@ async def run(args: Namespace) -> None:
             args.max_citations_per_paper,
             args.politeness_factor,
             args.max_request_errors,
-            []
-            if args.excluded_papers is None
-            else [Paper.partial_from_string(e) for e in args.excluded_papers],
+            get_excluded_papers(args.excluded_papers),
         )
 
         await traverser.collect(args.max_depth)
 
-        logger.info(f"Visualizing result of {start_paper}")
-        visualize(
-            Traverser.to_nx_graph(traverser),
-            get_valid_filename(f"{start_paper}.html"),
-        )
+        if args.create_graph:
+            logger.info(f"Visualizing result of {start_paper}")
+            visualize(
+                Traverser.to_nx_graph(traverser),
+                args.name.strip()
+                if isinstance(args.name, str) and len(args.name) > 0
+                else get_valid_filename(f"{start_paper}.html"),
+            )
+
+        if args.create_list:
+            logger.info(f"Writing list of results of {start_paper}")
+            write_list(
+                traverser.papers.values(),
+                args.list_file_name.strip()
+                if isinstance(args.list_file_name, str) and len(args.list_file_name) > 0
+                else get_valid_filename(f"{start_paper}.csv"),
+            )
 
 
 def get_arg_parser() -> ArgumentParser:
@@ -139,14 +210,14 @@ def get_arg_parser() -> ArgumentParser:
     )
     parser.add_argument(
         "--cache-path",
-        "-w",
+        "-t",
         dest="cache_path",
         help=(
-            "The path to load the cache file from and to save it to, default is "
-            f"{get_cache_dir()}"
+            "The path to load the cache file from and to save it to, default directory "
+            f"is {get_cache_dir()}, the name will be the paper id."
         ),
         type=Path,
-        default=get_cache_dir()
+        default=get_cache_dir(),
     )
     parser.add_argument(
         "--max-citations-per-paper",
@@ -195,10 +266,41 @@ def get_arg_parser() -> ArgumentParser:
             "not relevant for the current research and therefore narrow down the "
             "selection. To define papers, use any id type followed by the id, separated"
             f" by '{PAPER_ID_TYPE_SEPARATOR}', like so: "
-            f"{{{'|'.join(ID_TYPES)}}}{PAPER_ID_TYPE_SEPARATOR}PAPER_ID"
+            f"{{{'|'.join(ID_TYPES)}}}{PAPER_ID_TYPE_SEPARATOR}PAPER_ID. "
+            "Alternatively a path to a file can be given where the paper ids are "
+            "listed, each paper id in a separate line. Lines starting with a "
+            f"'{PAPER_ID_LIST_FILE_COMMENT_CHAR}'-charcter are treated as comments and "
+            "are ignored entirely."
         ),
         type=str,
         nargs="*",
+    )
+    parser.add_argument(
+        "--list",
+        "-l",
+        dest="create_list",
+        help=("Output a list containing the papers, ordered by their level."),
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--list-file-name",
+        "-n",
+        dest="list_file_name",
+        help=(
+            "The file name of the list file, by default the authors and the year are "
+            "the file name. The file is created in the current working directory"
+        ),
+        default=None,
+        type=str
+    )
+    parser.add_argument(
+        "--no-graph",
+        "-g",
+        dest="create_graph",
+        help="Use to prevent creating a visualization graph",
+        action="store_false",
+        default=True
     )
 
     parser.add_argument(
@@ -215,6 +317,16 @@ def get_arg_parser() -> ArgumentParser:
             " is assumed, this can be changed with the ID_TYPE parameter"
         ),
         type=str,
+    )
+    parser.add_argument(
+        "name",
+        help=(
+            "The name of the graph output html file, if not given, it will be in the "
+            "current working directory with the authors and the year as the file name."
+        ),
+        type=str,
+        nargs="?",
+        default=None
     )
 
     return parser

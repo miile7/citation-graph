@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "citation_graph"
-version = "1.2.0"
+version = "1.2.1"
 description = ""
 authors = ["miile7"]
 readme = "README.md"

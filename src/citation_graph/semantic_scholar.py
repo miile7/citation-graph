@@ -106,6 +106,7 @@ class SematicScholarDatabase(Database):
             )
             paper.url = f"{self.paper_base_url}/{result['paperId']}"
             paper.meta[self.name] = {"citation_count": result["citationCount"]}
+            paper.temp_citation_count = result["citationCount"]
         except KeyError:
             raise ValueError(f"Cannot parse json {result}")
 
@@ -117,7 +118,10 @@ class SematicScholarDatabase(Database):
                 )
             )
         except KeyError:
-            pass
+            self.logger.warning(
+                f"Cannot find an external id for {paper}, json result does not contain "
+                f"a known id definition: {result['externalIds']}"
+            )
 
         return paper
 
@@ -155,7 +159,11 @@ class SematicScholarDatabase(Database):
 
         self.logger.info(
             f"Fetching results ({offset}..{offset + limit}) for {paper} from {url} "
-            f"(actually loading {params['limit']} results for cache"
+        )
+        self.logger.debug(
+            f"Actually loading {params['limit']} results for improved caching, "
+            "there is no limit for items, only for requests, therefore try to get as "
+            "much as possible"
         )
         result = get(url, params, timeout=REQUEST_TIMEOUT)
 
@@ -179,7 +187,7 @@ class SematicScholarDatabase(Database):
                 f"returning only the first {limit} elements as requested."
             )
             cache_only = cited_by_papers[limit:]
-            self.cache_citations(paper, cache_only)
+            self.cache_citations(paper, cache_only, offset, limit)
 
             cited_by_papers = cited_by_papers[:limit]
 

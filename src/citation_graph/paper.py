@@ -1,22 +1,22 @@
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from logging import Logger
 from math import ceil
+from pathlib import Path
 from Levenshtein import distance
 from re import compile
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union, get_args
+from typing import Any, Dict, Generator, List, Literal, Optional, Tuple, Union, get_args
 
 
 WORD_BOUNDARIES_REG = compile(r"[\b]+")
-
 """
 `ceil(LEVESHTEIN_SIMILAR_DISTANCE_FACTOR * <chars in the paper title>) - 1` characters
 may differ when comparing two paper titles to still treat them as the same title
 """
 LEVESHTEIN_SIMILAR_DISTANCE_FACTOR = 0.02
-
 PAPER_ID_TYPE_SEPARATOR = "::"
-
 MISSING_TITLE = "{{MISSING_TITLE}}"
+PAPER_ID_LIST_FILE_COMMENT_CHAR = "#"
 
 
 IdType = Literal["doi", "dblp", "arxiv", "corpusid"]
@@ -42,6 +42,7 @@ class Paper:
     ids: OrderedDict[IdType, Union[str, int]] = field(default_factory=OrderedDict)
     url: Optional[str] = None
     citation_count: Optional[int] = None
+    temp_citation_count: Optional[int] = None
     meta: Dict[str, Any] = field(default_factory=dict)
 
     def get_authors_str(self, short=False) -> str:
@@ -136,18 +137,21 @@ class Paper:
         paper_split = paper_def.strip().split(PAPER_ID_TYPE_SEPARATOR, 1)
 
         if len(paper_split) != 2:
-            raise ValueError(f"Cannot parse paper definition '{paper_def}'.")
+            raise ValueError(
+                f"Cannot parse paper definition '{paper_def}', the id type and the id "
+                f"must be separated by '{PAPER_ID_TYPE_SEPARATOR}'."
+            )
 
         id_type, id_ = paper_split
 
         if id_type not in ID_TYPES:
             raise ValueError(
-                f"The id type {id_type} is invalid. Supported types are "
-                f"{', '.join(ID_TYPES)}."
+                f"The id type '{id_type}' of paper definition '{paper_def}' is invalid."
+                f" Supported types are {', '.join(ID_TYPES)}."
             )
 
         if id_ == "":
-            raise ValueError("The id is empty")
+            raise ValueError("The id of paper definition '{paper_def}' is empty.")
 
         paper = Paper([], 0, MISSING_TITLE)
         paper.set_external_id({id_type: id_})
@@ -180,3 +184,22 @@ class Paper:
     @staticmethod
     def normalize_external_id(id_name: str) -> str:
         return WORD_BOUNDARIES_REG.sub("", id_name.lower().strip())
+
+    @staticmethod
+    def from_file(
+        file_path: Path, logger: Logger, encoding: str = "utf-8", **kwargs
+    ) -> Generator["Paper", None, None]:
+        if file_path.exists():
+            with open(file_path, "r", encoding=encoding, **kwargs) as f:
+                for i, raw_line in enumerate(f):
+                    line = raw_line.strip()
+
+                    if line.startswith(PAPER_ID_LIST_FILE_COMMENT_CHAR):
+                        continue
+
+                    try:
+                        yield Paper.partial_from_string(raw_line)
+                    except ValueError as e:
+                        logger.warning(
+                            f"Cannot parse paper definition in line {i + 1}: {str(e)}"
+                        )
