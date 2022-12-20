@@ -166,3 +166,4 @@ cython_debug/
 /*.cache.json
 /exclude.txt
 /todo.md
+/config.ini

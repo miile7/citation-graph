@@ -1,8 +1,9 @@
+from configparser import ConfigParser
 from logging import getLogger
 from requests import get
 from typing import Any, Dict, Generator, List, Optional, TypedDict, Union, cast
-from citation_graph.database import REQUEST_TIMEOUT, Database
 
+from citation_graph.database import REQUEST_TIMEOUT, Database
 from citation_graph.paper import AuthorName, IdType, Paper
 
 
@@ -40,6 +41,8 @@ class _ResultJSON(TypedDict):
 
 
 class SematicScholarDatabase(Database):
+    api_key: Optional[str] = None
+
     paper_base_url = "https://www.semanticscholar.org/paper"
     api_base_url = "https://api.semanticscholar.org/graph/v1/paper"
     params = {
@@ -47,17 +50,22 @@ class SematicScholarDatabase(Database):
     }
 
     def __init__(self) -> None:
-        logger = getLogger(
-            "citation_graph.semantic_scholar.SemanticScholarTraverser"
-        )
+        logger = getLogger("citation_graph.semantic_scholar.SemanticScholarTraverser")
         super().__init__(
             "semanticscholar.org",
             logger,
             5 * 60 / 100,  # 100 requests per five minutes
             True,
             100,
-            10
+            10,
         )
+
+    def _get(self, url: Union[str, bytes], params: Dict[Any, Any]) -> Any:
+        if self.api_key is None:
+            headers = None
+        else:
+            headers = {"x-api-key": self.api_key}
+        return get(url, params, timeout=REQUEST_TIMEOUT, headers=headers)
 
     def wait_before_request(self, paper: Paper, offset: int, limit: int) -> bool:
         if not self.is_paper_cited_by_database(paper):
@@ -89,7 +97,7 @@ class SematicScholarDatabase(Database):
         url = self.get_paper_url_by_id(id_type, id)
         self.logger.info(f"Fetching paper for {id_type} {id} by url {url}")
 
-        result = get(url, self.params, timeout=REQUEST_TIMEOUT)
+        result = self._get(url, self.params)
         r = result.json()
 
         if not isinstance(r, dict):
@@ -106,7 +114,7 @@ class SematicScholarDatabase(Database):
             )
             paper.url = f"{self.paper_base_url}/{result['paperId']}"
             paper.meta[self.name] = {"citation_count": result["citationCount"]}
-            paper.temp_citation_count = result["citationCount"]
+            paper.expected_citation_count = result["citationCount"]
         except KeyError:
             raise ValueError(f"Cannot parse json {result}")
 
@@ -165,7 +173,7 @@ class SematicScholarDatabase(Database):
             "there is no limit for items, only for requests, therefore try to get as "
             "much as possible"
         )
-        result = get(url, params, timeout=REQUEST_TIMEOUT)
+        result = self._get(url, params)
 
         r = result.json()
         if (
@@ -199,6 +207,26 @@ class SematicScholarDatabase(Database):
             papers.append(self._parse_json_result_paper(citing_paper["citingPaper"]))
 
         return papers
+
+    def load_settings(self, config: ConfigParser) -> None:
+        if self.name in config:
+            self.api_key = config.get(self.name, "api_key", fallback=None)
+            if self.api_key is not None:
+                self.logger.info(
+                    f"Found API key for {self.name}: {'*' * len(self.api_key)}"
+                )
+
+            if self.api_key is not None:
+                requests_per_second = config.get(
+                    self.name, "api_requests_per_second", fallback=None
+                )
+                if isinstance(requests_per_second, int):
+                    self.idle_time = max(1 / requests_per_second, 0.01)
+                    self.logger.info(
+                        f"Decreasing idle time of {self.name} to {self.idle_time}s "
+                        f"because API key {requests_per_second} requests per second are"
+                        " supported."
+                    )
 
     @staticmethod
     def _parse_author_names(

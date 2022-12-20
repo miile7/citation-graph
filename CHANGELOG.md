@@ -1,5 +1,11 @@
 # Changelog
 
+## Version 1.2.2
+
+- Bug fixes
+- Improve README.md
+- Support API keys
+
 ## Version 1.2.1
 
 - Bug fixes

@@ -1,6 +1,6 @@
 from asyncio import sleep
 from dataclasses import dataclass
-from logging import DEBUG, LoggerAdapter, getLogger
+from logging import DEBUG, getLogger
 from networkx import Graph as NXGraph  # type: ignore[import]
 from random import random
 from typing import (
@@ -14,12 +14,11 @@ from typing import (
     Optional,
     Tuple,
     TypeVar,
-    TypedDict,
 )
 from citation_graph.database import Database
 
 from citation_graph.paper import Paper
-from citation_graph.utils import get_colormap, get_size
+from citation_graph.utils import get_colormap, get_size, create_html_table
 
 
 @dataclass
@@ -297,19 +296,33 @@ class Traverser:
             # group=paper.year,
             year=paper.year,
             has_citations=paper.citation_count is not None and paper.citation_count > 0,
-            # meta_citation_count=paper.meta["semanticscholar.org"]["citation_count"] > 0,
+            has_expected_citations=(
+                paper.expected_citation_count is not None
+                and paper.expected_citation_count > 0
+            ),
             title=(
                 f"<h3>{paper.title}</h3>"
                 f"<p>{paper.year}, {paper.get_authors_str()}</p>"
                 # f"<p>{paper.abstract}</p>"
-                "<table>"
-                f"<tr><th>URL</th><td><a href='{paper.url}'>{paper.url}</a></td></tr>"
-                f"<tr><th>Id</th><td><code>{paper.get_id()}</code></td></tr>"
-                "<tr><th>Citation count</th><td>"
-                f"{paper.citation_count if paper.citation_count is not None else '?'}"
-                "</td></tr>"
-                f"<tr><th>Meta</th><td><code>{paper.meta}</code></td></tr>"
-                "</table>"
+            )
+            + create_html_table(
+                (
+                    ("Url", f"<a target='_blank' href='{paper.url}'>{paper.url}</a>"),
+                    ("Id", f"<code>{paper.get_id()}</code>"),
+                    (
+                        "Actual citation count",
+                        paper.citation_count
+                        if paper.citation_count is not None
+                        else "?",
+                    ),
+                    (
+                        "Expected citation count",
+                        paper.expected_citation_count
+                        if paper.expected_citation_count is not None
+                        else "?",
+                    ),
+                    ("Meta", f"<pre>{paper.meta}</pre>"),
+                )
             ),
         )
 

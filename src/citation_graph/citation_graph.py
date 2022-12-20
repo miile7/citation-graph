@@ -1,5 +1,6 @@
 from asyncio import run as run_async
 from argparse import ArgumentParser, Namespace
+from configparser import ConfigParser
 from csv import writer
 from logging import DEBUG, INFO, WARNING, basicConfig, getLogger
 from pathlib import Path
@@ -33,6 +34,7 @@ DEFAULT_MAX_CITATIONS_PER_PAPER = 300
 DEFAULT_MAX_REQUEST_ERRORS = 10
 DEFAULT_ID_TYPE = "doi"
 CSV_DELIMITER = ";"
+DEFAULT_DATABASE_CONFIG_FILE = "config.ini"
 
 
 DATABASES: List[Database] = [SematicScholarDatabase()]
@@ -55,6 +57,7 @@ class ParserArgs(TypedDict, total=False):
     create_list: bool
     create_graph: bool
     list_file_name: Optional[str]
+    database_config: str
 
 
 def visualize(graph: Graph, filename: str) -> None:
@@ -62,7 +65,7 @@ def visualize(graph: Graph, filename: str) -> None:
         height="750px",
         width="100%",
         bgcolor="#222222",
-        font_color="white",
+        font_color="white",  # type: ignore
         filter_menu=True,
     )
     net.from_nx(graph)
@@ -96,7 +99,7 @@ def write_list(nodes: Iterable[_PaperNode], filename: str) -> None:
                 paper.year,
                 paper.citation_count,
                 paper.url,
-                paper.temp_citation_count,
+                paper.expected_citation_count,
                 paper.meta
             ))
 
@@ -119,10 +122,25 @@ def get_excluded_papers(excluded_papers: Optional[List[str]]) -> List[Paper]:
 
 
 async def run(args: Namespace) -> None:
+    config_path = Path(args.database_config)
+    config: Optional[ConfigParser] = None
+
+    if not config_path.exists() or not config_path.is_file():
+        logger.warning(
+            f"Database configuration file {config_path} could not be opened. "
+            "Everything will work as normal, but e.g. no privileged API access is "
+            "possible due to missing API keys."
+        )
+    else:
+        config = ConfigParser()
+        config.read(config_path)
+
     start_paper: Optional[Paper] = None
     for database in DATABASES:
         if start_paper is None:
             start_paper = await database.get_paper(args.id_type, args.id)
+        if config is not None:
+            database.load_settings(config)
 
     if start_paper is None:
         raise Exception(f"Could not find any paper for {args.id_type} {args.id}")
@@ -301,6 +319,18 @@ def get_arg_parser() -> ArgumentParser:
         help="Use to prevent creating a visualization graph",
         action="store_false",
         default=True
+    )
+    parser.add_argument(
+        "--database-config",
+        "-s",
+        dest="database_config",
+        help=(
+            "The path for additional settings for the databases, e.g. API keys. Each "
+            "database has its own section, the keys depend on the database. "
+            "If not given, the program will look for a file with the name "
+            f"{DEFAULT_DATABASE_CONFIG_FILE} in the current working directory"
+        ),
+        default=DEFAULT_DATABASE_CONFIG_FILE
     )
 
     parser.add_argument(

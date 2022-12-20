@@ -42,7 +42,7 @@ class Paper:
     ids: OrderedDict[IdType, Union[str, int]] = field(default_factory=OrderedDict)
     url: Optional[str] = None
     citation_count: Optional[int] = None
-    temp_citation_count: Optional[int] = None
+    expected_citation_count: Optional[int] = None
     meta: Dict[str, Any] = field(default_factory=dict)
 
     def get_authors_str(self, short=False) -> str:

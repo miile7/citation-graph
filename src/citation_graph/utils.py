@@ -4,18 +4,7 @@ from os import name, environ, path
 from pathlib import Path
 from re import compile
 from sys import platform
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    Generator,
-    Iterable,
-    List,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
 from citation_graph.paper import Paper
 
@@ -91,3 +80,19 @@ def get_colormap(values: List[T]) -> Dict[T, str]:
         color_map[value] = hsv_to_hex(*get_hsv(i, (0, m)))
 
     return color_map
+
+
+def create_html_table(table: Iterable[Sequence[Any]]) -> str:
+    column_number = max((len(c) for c in table))
+
+    html_table = ["<table>"]
+    for row in table:
+        html_table.append("<tr>")
+
+        html_table += [f"<td>{c}</td>" for c in row]
+        html_table += ["<td></td>"] * (column_number - len(row))
+
+        html_table.append("</tr>")
+
+    html_table.append("</table>")
+    return "".join(html_table)

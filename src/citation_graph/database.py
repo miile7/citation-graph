@@ -1,4 +1,5 @@
 from collections import defaultdict
+from configparser import ConfigParser
 from dataclasses import dataclass, field
 from logging import DEBUG, Logger
 from typing import DefaultDict, Dict, List, Literal, Optional, TypedDict, Union
@@ -135,7 +136,7 @@ class Database:
         if not error and self.has_all_citation_cache_entries(paper, offset, limit):
             return cache_citations
         else:
-            self.logger.debug(f"Extending data from cache with new data")
+            self.logger.debug("Extending data from cache with new data")
             citations = await self._get_cited_by(
                 paper, offset + len(cache_citations), limit - len(cache_citations)
             )
@@ -145,6 +146,7 @@ class Database:
         return cache_citations + citations
 
     async def _get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
+        # has to be implemented by child classes
         raise NotImplementedError()
 
     async def get_paper(self, id_type: IdType, id_: Union[str, int]) -> Paper:
@@ -158,6 +160,7 @@ class Database:
         return paper
 
     async def _get_paper(self, id_type: IdType, id: Union[str, int]) -> Paper:
+        # has to be implemented by child classes
         raise NotImplementedError()
 
     def toJson(self) -> DatabaseJsonRepresentation:
@@ -167,3 +170,7 @@ class Database:
             "citation_cache": self.citation_cache,
             "paper_cache": self.paper_cache,
         }
+
+    def load_settings(self, config: ConfigParser) -> None:
+        # has to be implemented by child classes
+        pass

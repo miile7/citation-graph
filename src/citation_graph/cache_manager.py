@@ -1,7 +1,6 @@
 from argparse import Namespace
 from contextlib import AbstractContextManager
 from copy import deepcopy
-from io import TextIOWrapper
 from json import JSONEncoder, dump, load
 from logging import Logger, getLogger
 from pathlib import Path
