@@ -1,9 +1,10 @@
 [tool.poetry]
 name = "citation_graph"
-version = "1.2.2"
-description = ""
+version = "1.2.3"
+description = "Create a citation graph starting from a root paper"
 authors = ["miile7"]
 readme = "README.md"
+homepage = "https://github.com/miile7/citation-graph"
 
 [tool.poetry.dependencies]
 python = "^3.8"

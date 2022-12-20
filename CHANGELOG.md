@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 1.2.3
+
+- Minor fixes of README.md
+- Minor adjustments for pypi.org release
+
 ## Version 1.2.2
 
 - Bug fixes

@@ -1,7 +1,7 @@
 # Citation Graph
 
-![Citation Graph example screenshot](docs/screenshot1.jpg)
-![Citation Graph example screenshot](docs/screenshot2.jpg)
+<img src='docs/screenshot1.jpg' width="750px" alt="Overview over all citations" />
+<img src='docs/screenshot2.jpg' width="750px" alt="Hover over node for more details" />
 
 Citation Graph helps you creating a literature graph from one starting scientific
 publication. By the help of some scientific databases (currently only
@@ -64,11 +64,11 @@ To create a (more-less) full citation graph, the following procedure is recommen
 
 ## Installation
 
-<!-- ### Via `pip`
+### Via `pip`
 
 ```bash
 pip install citation_graph
-``` -->
+```
 
 ### From source
 To run this program from the code directly, [`python`](https://www.python.org/) and
@@ -104,12 +104,12 @@ operating system (`~/.cache/pypoetry`, `~/Library/Caches/pypoetry` or
 
 ## Execution
 
-<!-- ### For `pip` installation
+### For `pip` installation
 
 To execute the program use
 ```
 python -m citation_graph "<DOI>"
-``` -->
+```
 
 ### For manual and development installation
 
