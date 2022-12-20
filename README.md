@@ -67,7 +67,7 @@ To create a (more-less) full citation graph, the following procedure is recommen
 ### Via `pip`
 
 ```bash
-pip install citation_graph
+pip install citation-graph
 ```
 
 ### From source
