@@ -19,7 +19,8 @@ getting results at all. This is supported by a database `config` file.
 
 ## Key Features
 
-- Create Citation Graph starting from one paper
+- Create Citation Graph starting from one paper by requesting information from online
+  databases
 - Merge results from different databases (Coming soon!)
 - Create citation list file (csv file)
 - Support API keys for (faster) access
