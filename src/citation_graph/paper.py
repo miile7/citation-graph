@@ -6,14 +6,16 @@ from pathlib import Path
 from Levenshtein import distance
 from re import compile
 from typing import Any, Dict, Generator, List, Literal, Optional, Tuple, Union, get_args
+from unidecode import unidecode
 
 
-WORD_BOUNDARIES_REG = compile(r"[\b]+")
+PUNCTUATION_REG = compile(r"[°^!\"§%&/()\[\]=\{\}?*+~'#,;.:\-_\s]+")
+LATEX_MATH_REG = compile(r"\$[^\$]*\$")
 """
 `ceil(LEVESHTEIN_SIMILAR_DISTANCE_FACTOR * <chars in the paper title>) - 1` characters
 may differ when comparing two paper titles to still treat them as the same title
 """
-LEVESHTEIN_SIMILAR_DISTANCE_FACTOR = 0.02
+LEVESHTEIN_SIMILAR_DISTANCE_FACTOR = 0.05
 PAPER_ID_TYPE_SEPARATOR = "::"
 MISSING_TITLE = "{{MISSING_TITLE}}"
 PAPER_ID_LIST_FILE_COMMENT_CHAR = "#"
@@ -133,12 +135,25 @@ class Paper:
         return False
 
     @staticmethod
-    def partial_from_string(paper_def: str) -> "Paper":
-        paper_split = paper_def.strip().split(PAPER_ID_TYPE_SEPARATOR, 1)
+    def create_id(id_type: IdType, id_: Union[str, int]) -> str:
+        return f"{id_type}{PAPER_ID_TYPE_SEPARATOR}{id_}"
+
+    @staticmethod
+    def partial_from_string(paper_id: str) -> "Paper":
+        """Create a paper that has no authors, is from year zero and has a missing title
+        name only with the `paper_id` as the id.
+
+        Params
+        ------
+        paper_id
+            The id of the paper where the id type is followed by the id, separated by
+            the value of `PAPER_ID_TYPE_SEPARATOR`
+        """
+        paper_split = paper_id.strip().split(PAPER_ID_TYPE_SEPARATOR, 1)
 
         if len(paper_split) != 2:
             raise ValueError(
-                f"Cannot parse paper definition '{paper_def}', the id type and the id "
+                f"Cannot parse paper definition '{paper_id}', the id type and the id "
                 f"must be separated by '{PAPER_ID_TYPE_SEPARATOR}'."
             )
 
@@ -146,7 +161,7 @@ class Paper:
 
         if id_type not in ID_TYPES:
             raise ValueError(
-                f"The id type '{id_type}' of paper definition '{paper_def}' is invalid."
+                f"The id type '{id_type}' of paper definition '{paper_id}' is invalid."
                 f" Supported types are {', '.join(ID_TYPES)}."
             )
 
@@ -159,36 +174,12 @@ class Paper:
         return paper
 
     @staticmethod
-    def create_id(id_type: IdType, id_: Union[str, int]) -> str:
-        return f"{id_type}{PAPER_ID_TYPE_SEPARATOR}{id_}"
-
-    @staticmethod
-    def _normalize_title(title: str) -> str:
-        return WORD_BOUNDARIES_REG.sub(
-            " ",  # remove punctuation
-            title.encode("utf-8").decode("ascii", errors="replace"),  # remove non-ascii
-        )
-
-    @staticmethod
-    def titles_resemble(title1: str, title2: str) -> bool:
-        normalized_title_1 = Paper._normalize_title(title1)
-        normalized_title_2 = Paper._normalize_title(title2)
-
-        threshold = ceil(
-            min(len(normalized_title_1), len(normalized_title_2))
-            * LEVESHTEIN_SIMILAR_DISTANCE_FACTOR
-        )
-
-        return distance(normalized_title_1, normalized_title_2) < threshold
-
-    @staticmethod
-    def normalize_external_id(id_name: str) -> str:
-        return WORD_BOUNDARIES_REG.sub("", id_name.lower().strip())
-
-    @staticmethod
     def from_file(
         file_path: Path, logger: Logger, encoding: str = "utf-8", **kwargs
     ) -> Generator["Paper", None, None]:
+        """Load papers with their definition (id type followed by id, separated by
+        `PAPER_ID_TYPE_SEPARATOR` from the given file.
+        """
         if file_path.exists():
             with open(file_path, "r", encoding=encoding, **kwargs) as f:
                 for i, raw_line in enumerate(f):
@@ -203,3 +194,30 @@ class Paper:
                         logger.warning(
                             f"Cannot parse paper definition in line {i + 1}: {str(e)}"
                         )
+
+    @staticmethod
+    def _normalize_title(title: str) -> str:
+        return PUNCTUATION_REG.sub(
+            " ",  # remove punctuation
+            LATEX_MATH_REG.sub(
+                "",  # remove latex math
+                unidecode(title),  # remove non-ascii
+            ),
+        ).lower()
+
+    @staticmethod
+    def titles_resemble(title1: str, title2: str) -> bool:
+        normalized_title_1 = Paper._normalize_title(title1)
+        normalized_title_2 = Paper._normalize_title(title2)
+
+        threshold = ceil(
+            min(len(normalized_title_1), len(normalized_title_2))
+            * LEVESHTEIN_SIMILAR_DISTANCE_FACTOR
+        )
+
+        levenshtein = distance(normalized_title_1, normalized_title_2)
+        return levenshtein < threshold
+
+    @staticmethod
+    def normalize_external_id(id_name: str) -> str:
+        return PUNCTUATION_REG.sub("", id_name.lower().strip())

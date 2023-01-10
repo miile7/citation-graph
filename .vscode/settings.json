@@ -4,5 +4,17 @@
     "files.associations": {
         "README": "markdown"
     },
-    "python.analysis.typeCheckingMode": "basic"
+    "python.analysis.typeCheckingMode": "basic",
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "cSpell.words": [
+        "Matti",
+        "Meikäläinen",
+        "Pallino",
+        "Pinco",
+        "unidecode"
+    ]
 }
