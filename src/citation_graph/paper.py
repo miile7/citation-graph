@@ -44,7 +44,7 @@ class Paper:
     ids: OrderedDict[IdType, Union[str, int]] = field(default_factory=OrderedDict)
     url: Optional[str] = None
     citation_count: Optional[int] = None
-    expected_citation_count: Optional[int] = None
+    expected_citation_count: Dict[str, int] = field(default_factory=dict)
     meta: Dict[str, Any] = field(default_factory=dict)
 
     def get_authors_str(self, short=False) -> str:
@@ -109,6 +109,11 @@ class Paper:
         for name in ID_TYPES:
             if name in ids:
                 self.ids[name] = ids[name]
+
+    def set_expected_citation_count(
+        self, database_name: str, citation_count: int
+    ) -> None:
+        self.expected_citation_count[database_name] = citation_count
 
     def __eq__(self, o: object) -> bool:
         if not isinstance(o, Paper):

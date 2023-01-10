@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 1.2.4
+- Add test for `Paper`
+- Add equality checks for `Paper`
+- Introduce `RestfulDatabase` for further databases
+
 ## Version 1.2.3
 
 - Minor fixes of README.md

@@ -297,8 +297,8 @@ class Traverser:
             year=paper.year,
             has_citations=paper.citation_count is not None and paper.citation_count > 0,
             has_expected_citations=(
-                paper.expected_citation_count is not None
-                and paper.expected_citation_count > 0
+                len(paper.expected_citation_count) is not None
+                and any(paper.expected_citation_count.values())
             ),
             title=(
                 f"<h3>{paper.title}</h3>"
@@ -317,8 +317,11 @@ class Traverser:
                     ),
                     (
                         "Expected citation count",
-                        paper.expected_citation_count
-                        if paper.expected_citation_count is not None
+                        ", ".join(
+                            f"{n}: {v}"
+                            for n, v in paper.expected_citation_count.items()
+                        )
+                        if len(paper.expected_citation_count) > 0
                         else "?",
                     ),
                     ("Meta", f"<pre>{paper.meta}</pre>"),

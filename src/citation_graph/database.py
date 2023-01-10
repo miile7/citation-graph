@@ -1,6 +1,5 @@
 from collections import defaultdict
 from configparser import ConfigParser
-from dataclasses import dataclass, field
 from logging import DEBUG, Logger
 from typing import DefaultDict, Dict, List, Literal, Optional, TypedDict, Union
 
@@ -32,7 +31,6 @@ def _citation_cache_entry_factory() -> _CitationDictEntry:
     return {"papers": [], "offset": 0, "limit": 0}
 
 
-@dataclass
 class Database:
     name: str
     logger: Logger
@@ -40,16 +38,41 @@ class Database:
     use_pagination: bool
     page_size: int
     error_count: int
-    citation_cache: CitationCache = field(
-        default_factory=lambda: defaultdict(_citation_cache_entry_factory)
-    )
-    paper_cache: PaperCache = field(default_factory=dict)
+    citation_cache: CitationCache
+    paper_cache: PaperCache
+
+    def __init__(
+        self,
+        name: str,
+        logger: Logger,
+        idle_time: float,
+        use_pagination: bool,
+        page_size: int = 100,
+        error_count: int = 10,
+        citation_cache: Optional[CitationCache] = None,
+        paper_cache: Optional[PaperCache] = None,
+    ) -> None:
+        self.name = name
+        self.logger = logger
+        self.idle_time = idle_time
+        self.use_pagination = use_pagination
+        self.page_size = page_size
+        self.error_count = error_count
+
+        self.citation_cache = (
+            defaultdict(_citation_cache_entry_factory)
+            if citation_cache is None
+            else citation_cache
+        )
+        self.paper_cache = {} if paper_cache is None else paper_cache
 
     def has_all_citation_cache_entries(
         self, paper: Paper, offset: int, limit: int
     ) -> bool:
         paper_id = paper.get_id()
         if paper_id is None:
+            return False
+        if paper_id not in self.citation_cache:
             return False
         return (
             self.citation_cache[paper_id]["offset"] <= offset
@@ -111,10 +134,25 @@ class Database:
             self.cache_papers(citations)
 
     def wait_before_request(self, paper: Paper, offset: int, limit: int) -> bool:
+        if self.paper_is_not_cited_by_database(paper):
+            return False
         return not self.has_all_citation_cache_entries(paper, offset, limit)
+
+    def paper_is_not_cited_by_database(self, paper: Paper) -> bool:
+        return (
+            self.name in paper.expected_citation_count
+            and paper.expected_citation_count[self.name] == 0
+        )
 
     async def get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
         """Get all papers that cite the `paper` from the parameters."""
+        if self.paper_is_not_cited_by_database(paper):
+            self.logger.info(
+                f"Skipping request of {paper}, database does not have any citations, "
+                "this information was already received when fetching the paper."
+            )
+            return []
+
         citations: List[Paper] = []
         cache_citations: List[Paper] = []
         error = False

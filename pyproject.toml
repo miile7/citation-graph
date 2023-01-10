@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "citation_graph"
-version = "1.2.3"
+version = "1.2.4"
 description = "Create a citation graph starting from a root paper"
 authors = ["miile7"]
 readme = "README.md"

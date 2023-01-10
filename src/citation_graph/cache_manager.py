@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Literal, Optional
 from citation_graph.database import Database
 
 from citation_graph.paper import AuthorName, Paper
-from citation_graph.utils import SLUG, get_cache_dir, get_valid_filename
+from citation_graph.static import SLUG
+from citation_graph.utils import get_cache_dir, get_valid_filename
 from citation_graph.version import get_version
 
 
@@ -91,6 +92,9 @@ class CacheManager(AbstractContextManager):
         load_cache_on_startup: bool,
         cache_path: Optional[Path] = None,
     ) -> None:
+        self.start_paper = start_paper
+        self.databases = databases
+
         cache_dir: Path
         if isinstance(cache_path, Path):
             if cache_path.is_dir():
@@ -110,8 +114,6 @@ class CacheManager(AbstractContextManager):
         if not cache_dir.exists():
             cache_dir.mkdir(0o777, True, True)
 
-        self.start_paper = start_paper
-        self.databases = databases
         self.args = args
         self.logger = getLogger("citation_graph.cache_manager.CacheManager")
 

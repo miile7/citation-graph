@@ -18,13 +18,12 @@ from citation_graph.paper import (
     Paper,
     PAPER_ID_LIST_FILE_COMMENT_CHAR,
 )
+from citation_graph.static import NAME, SLUG
 from citation_graph.semantic_scholar import SematicScholarDatabase
 from citation_graph.traverser import _PaperNode, Traverser
-from citation_graph.utils import SLUG, get_cache_dir, get_valid_filename
+from citation_graph.utils import get_cache_dir, get_valid_filename
 from citation_graph.version import get_version
 
-
-NAME = "Citation Graph"
 
 DEFAULT_LOG_LEVEL = WARNING
 
@@ -75,33 +74,39 @@ def visualize(graph: Graph, filename: str) -> None:
 def write_list(nodes: Iterable[_PaperNode], filename: str) -> None:
     with open(filename, "w", encoding="utf-8", newline="") as f:
         w = writer(f, delimiter=CSV_DELIMITER)
-        w.writerow((
-            "Depth",
-            "Parent id",
-            "Id",
-            "Authors",
-            "Title",
-            "Year",
-            "Citation count (Actually found)",
-            "Url",
-            "Received citation count",
-            "Meta"
-        ))
+        w.writerow(
+            (
+                "Depth",
+                "Parent id",
+                "Id",
+                "Authors",
+                "Title",
+                "Year",
+                "Citation count (Actually found)",
+                "Url",
+                "Received citation count",
+                "Meta",
+            )
+        )
 
         for node in sorted(nodes, key=lambda n: n.depth):
             paper = node.paper
-            w.writerow((
-                node.depth,
-                node.parent_id,
-                paper.get_id(),
-                paper.get_authors_str(short=False),
-                paper.title,
-                paper.year,
-                paper.citation_count,
-                paper.url,
-                paper.expected_citation_count,
-                paper.meta
-            ))
+            w.writerow(
+                (
+                    node.depth,
+                    node.parent_id,
+                    paper.get_id(),
+                    paper.get_authors_str(short=False),
+                    paper.title,
+                    paper.year,
+                    paper.citation_count,
+                    paper.url,
+                    ", ".join(
+                        f"{n}: {v}" for n, v in paper.expected_citation_count.items()
+                    ),
+                    paper.meta,
+                )
+            )
 
 
 def get_excluded_papers(excluded_papers: Optional[List[str]]) -> List[Paper]:
@@ -299,7 +304,7 @@ def get_arg_parser() -> ArgumentParser:
         dest="create_list",
         help=("Output a list containing the papers, ordered by their level."),
         action="store_true",
-        default=False
+        default=False,
     )
     parser.add_argument(
         "--list-file-name",
@@ -310,7 +315,7 @@ def get_arg_parser() -> ArgumentParser:
             "the file name. The file is created in the current working directory"
         ),
         default=None,
-        type=str
+        type=str,
     )
     parser.add_argument(
         "--no-graph",
@@ -318,7 +323,7 @@ def get_arg_parser() -> ArgumentParser:
         dest="create_graph",
         help="Use to prevent creating a visualization graph",
         action="store_false",
-        default=True
+        default=True,
     )
     parser.add_argument(
         "--database-config",
@@ -330,7 +335,7 @@ def get_arg_parser() -> ArgumentParser:
             "If not given, the program will look for a file with the name "
             f"{DEFAULT_DATABASE_CONFIG_FILE} in the current working directory"
         ),
-        default=DEFAULT_DATABASE_CONFIG_FILE
+        default=DEFAULT_DATABASE_CONFIG_FILE,
     )
 
     parser.add_argument(
@@ -356,7 +361,7 @@ def get_arg_parser() -> ArgumentParser:
         ),
         type=str,
         nargs="?",
-        default=None
+        default=None,
     )
 
     return parser

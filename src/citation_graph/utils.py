@@ -7,8 +7,7 @@ from sys import platform
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
 from citation_graph.paper import Paper
-
-SLUG = "citation_graph"
+from citation_graph.static import SLUG
 
 
 NON_FILENAME_CHARS = compile(r"[^\w\d _\-,\.+()]+")

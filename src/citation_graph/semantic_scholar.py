@@ -1,10 +1,9 @@
 from configparser import ConfigParser
 from logging import getLogger
-from requests import get
 from typing import Any, Dict, Generator, List, Optional, TypedDict, Union, cast
 
-from citation_graph.database import REQUEST_TIMEOUT, Database
-from citation_graph.paper import AuthorName, IdType, Paper
+from citation_graph.restful_database import RestfulDatabase
+from citation_graph.paper import AuthorName, Paper
 
 
 class _ResultJSONExternalIds(TypedDict, total=False):
@@ -40,70 +39,41 @@ class _ResultJSON(TypedDict):
     data: List[_ResultJSONData]
 
 
-class SematicScholarDatabase(Database):
+class SematicScholarDatabase(RestfulDatabase[_ResultJSONPaper, _ResultJSON]):
     api_key: Optional[str] = None
 
     paper_base_url = "https://www.semanticscholar.org/paper"
-    api_base_url = "https://api.semanticscholar.org/graph/v1/paper"
-    params = {
-        "fields": ",".join(("title", "year", "authors", "externalIds", "citationCount"))
-    }
 
     def __init__(self) -> None:
         logger = getLogger("citation_graph.semantic_scholar.SemanticScholarTraverser")
+
         super().__init__(
             "semanticscholar.org",
             logger,
-            5 * 60 / 100,  # 100 requests per five minutes
-            True,
-            100,
-            10,
+            paper_api_url="https://api.semanticscholar.org/graph/v1/paper/{id}",
+            citation_api_url=(
+                "https://api.semanticscholar.org/graph/v1/paper/{id}/citations"
+            ),
+            api_params={
+                "fields": ",".join(
+                    ("title", "year", "authors", "externalIds", "citationCount")
+                )
+            },
+            id_formats={
+                "doi": "{id}",
+                "arxiv": "arXiv:{id}",
+                "corpusid": "CorpusID:{id}",
+            },
+            idle_time=5 * 60 / 100,  # 100 requests per five minutes
+            use_pagination=True,
+            page_size=100,
         )
 
-    def _get(self, url: Union[str, bytes], params: Dict[Any, Any]) -> Any:
-        if self.api_key is None:
-            headers = None
-        else:
-            headers = {"x-api-key": self.api_key}
-        return get(url, params, timeout=REQUEST_TIMEOUT, headers=headers)
+    def init_headers(self) -> Dict[str, Any]:
+        # if self.api_key is not None:
+        #     return {"x-api-key": self.api_key}
 
-    def wait_before_request(self, paper: Paper, offset: int, limit: int) -> bool:
-        if not self.is_paper_cited_by_database(paper):
-            return False
-        return super().wait_before_request(paper, offset, limit)
-
-    def get_paper_url(self, paper: Paper) -> str:
-        return self.get_paper_url_by_id(paper.get_id_type(), paper.get_raw_id())
-
-    def get_paper_url_by_id(
-        self, id_type: Optional[IdType], id: Union[str, int, None]
-    ) -> str:
-        if id is None:
-            raise KeyError("Ids of type None are invalid")
-
-        if id_type == "doi":
-            url_id = id
-        elif id_type == "arxiv":
-            url_id = f"arXiv:{id}"
-        elif id_type == "corpus_id":
-            url_id = f"CorpusID:{id}"
-        else:
-            raise KeyError(
-                "Cannot find an identifier that is supported by the current database."
-            )
-        return f"{self.api_base_url}/{url_id}"
-
-    async def _get_paper(self, id_type: IdType, id: Union[str, int]) -> Paper:
-        url = self.get_paper_url_by_id(id_type, id)
-        self.logger.info(f"Fetching paper for {id_type} {id} by url {url}")
-
-        result = self._get(url, self.params)
-        r = result.json()
-
-        if not isinstance(r, dict):
-            raise ValueError(f"Could not find information for paper with id {id}")
-
-        return self._parse_json_result_paper(cast(_ResultJSONPaper, r))
+        return {}
 
     def _parse_json_result_paper(self, result: _ResultJSONPaper) -> Paper:
         try:
@@ -113,8 +83,7 @@ class SematicScholarDatabase(Database):
                 result["title"],
             )
             paper.url = f"{self.paper_base_url}/{result['paperId']}"
-            paper.meta[self.name] = {"citation_count": result["citationCount"]}
-            paper.expected_citation_count = result["citationCount"]
+            paper.set_expected_citation_count(self.name, result["citationCount"])
         except KeyError:
             raise ValueError(f"Cannot parse json {result}")
 
@@ -132,74 +101,6 @@ class SematicScholarDatabase(Database):
             )
 
         return paper
-
-    def get_citing_papers_url(self, paper: Paper) -> str:
-        return f"{self.get_paper_url(paper)}/citations"
-
-    def is_paper_cited_by_database(self, paper: Paper) -> bool:
-        return (
-            self.name not in paper.meta
-            or "citation_count" not in paper.meta[self.name]
-            or paper.meta[self.name]["citation_count"] != 0
-        )
-
-    async def _get_cited_by(self, paper: Paper, offset: int, limit: int) -> List[Paper]:
-        if not self.is_paper_cited_by_database(paper):
-            self.logger.info(
-                f"Skipping request of {paper}, database does not have any citations, "
-                "this information was already received when fetching the paper."
-            )
-            return []
-
-        try:
-            url = self.get_citing_papers_url(paper)
-        except KeyError:
-            self.logger.info(
-                f"Skipping {paper}, cannot find an identifier for database requests"
-            )
-            return []
-
-        params: Dict[str, Any] = self.params.copy()
-        params["offset"] = offset
-        # load more for caching, this is the same request and does not have any
-        # penalty from the database concerning requests
-        params["limit"] = max(limit, self.page_size)
-
-        self.logger.info(
-            f"Fetching results ({offset}..{offset + limit}) for {paper} from {url} "
-        )
-        self.logger.debug(
-            f"Actually loading {params['limit']} results for improved caching, "
-            "there is no limit for items, only for requests, therefore try to get as "
-            "much as possible"
-        )
-        result = self._get(url, params)
-
-        r = result.json()
-        if (
-            not isinstance(r, dict)
-            or "data" not in r
-            or not isinstance(r["data"], list)
-        ):
-            raise ValueError(f"Cannot parser the returned json data: \n\n{result.text}")
-
-        self.logger.debug(f"Parsing result of {paper}")
-
-        cited_by_papers = self._parse_json_result_citing_paper(cast(_ResultJSON, r))
-
-        self.logger.debug(f"Found {len(cited_by_papers)} citations of {paper}")
-
-        if len(cited_by_papers) > limit:
-            self.logger.debug(
-                f"Caching last {len(cited_by_papers) - limit} elements for later use, "
-                f"returning only the first {limit} elements as requested."
-            )
-            cache_only = cited_by_papers[limit:]
-            self.cache_citations(paper, cache_only, offset, limit)
-
-            cited_by_papers = cited_by_papers[:limit]
-
-        return cited_by_papers
 
     def _parse_json_result_citing_paper(self, result: _ResultJSON) -> List[Paper]:
         papers: List[Paper] = []

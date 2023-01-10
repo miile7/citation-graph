@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from typing import Dict, List
+from typing import List
 import pytest
 
 from citation_graph.paper import (
