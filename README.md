@@ -1,12 +1,12 @@
 # Citation Graph
 
-<picture width="750px" alt="Overview over all citations" >
-  <source type="image/jpg" srcset="docs/screenshot1.jpg" />
-  <img src='https://github.com/miile7/citation-graph/blob/main/docs/screenshot1.jpg?raw=true'/>
+<picture style="width: 750px;">
+  <source type="image/jpg" srcset="docs/screenshot1.jpg" style="width: 100%;" />
+  <img src='https://github.com/miile7/citation-graph/blob/main/docs/screenshot1.jpg?raw=true' width="750px" alt="Overview over all citations" />
 </picture>
-<picture width="750px" alt="Hover over node for more details" >
-  <source type="image/jpg" srcset="docs/screenshot2.jpg" />
-  <img src='https://github.com/miile7/citation-graph/blob/main/docs/screenshot2.jpg?raw=true'/>
+<picture style="width: 750px;">
+  <source type="image/jpg" srcset="docs/screenshot2.jpg" style="width: 100%;" />
+  <img src='https://github.com/miile7/citation-graph/blob/main/docs/screenshot2.jpg?raw=true' width="750px" alt="Hover over node for more details" />
 </picture>
 
 Citation Graph helps you creating a literature graph from one starting scientific
