@@ -1,7 +1,13 @@
 # Citation Graph
 
-<img src='docs/screenshot1.jpg' width="750px" alt="Overview over all citations" />
-<img src='docs/screenshot2.jpg' width="750px" alt="Hover over node for more details" />
+<picture width="750px" alt="Overview over all citations" >
+  <source type="image/jpg" srcset="docs/screenshot1.jpg" />
+  <img src='https://github.com/miile7/citation-graph/blob/main/docs/screenshot1.jpg?raw=true'/>
+</picture>
+<picture width="750px" alt="Hover over node for more details" >
+  <source type="image/jpg" srcset="docs/screenshot2.jpg" />
+  <img src='https://github.com/miile7/citation-graph/blob/main/docs/screenshot2.jpg?raw=true'/>
+</picture>
 
 Citation Graph helps you creating a literature graph from one starting scientific
 publication. By the help of some scientific databases (currently only
@@ -36,29 +42,33 @@ To create a (more-less) full citation graph, the following procedure is recommen
 2. Find your paper at any scientific search engine, then copy one of the ids,
    preferable the DOI (other supported id types can be found by running
    `citation_graph -h`)
-3. Start with a broad search with depth 2 (find citations of papers that cite the root)
-   to find citations that are no dead ends. Do not include too many citations (the
-   maximum citations can be controlled with `-m`), this will slow down the process and
-   because also for uninteresting papers the full citations are collected. Example:
+3. Start with a broad search with depth 2 (`-d=2`). This will find citations of papers
+   that cite the root paper. This shows citations that are no dead ends. Do not include
+   too many citations (the maximum citations can be controlled with `-m`). A too high
+   `m` on the first run will slow down the process unnecessarily because citations of
+   uninteresting works are collected. A good first run is e.g.:
    `citation_graph -v -d=2 -m=100 <YOUR DOI>`
-4. Open the result graph and check the nodes with the most edges between the root node
-   and itself (for the first run this is two edges). Check those papers if they are
+4. Open the result graph and check the level-2-nodes, so the nodes that have two edges
+   between itself and the root (so `root`-`node`-`node`). Check those papers if they are
    relevant for your search. If not, create a file `excluded.txt` and copy the id
-   listed in the graph to this file. Each id has to be in its own line (comment is #)
-   All subsequent runs have to include `-x=excluded.txt`
+   from the graph to this file. Each id has to be in its own line (comment is #,
+   comments have to be in a separate line). All subsequent runs have to
+   include `-x=excluded.txt` to load the exclude file.
 5. Now step by step extend your search:
-   1. Extend the width by increasing `-m` while keeping the last `-d`, e.g.
+   1. Extend the broadness by increasing `-m` while keeping the last `-d`, e.g.
       `citation_graph -v -d=2 -m=200 -x=excluded.txt <YOUR DOI>`
-   2. Exclude irrelevant papers by traveling through the nodes with the most distance
-      to the root, then copy their id into the `excluded.txt`
+   2. Exclude irrelevant papers by traveling through the nodes with the most edges
+      between itself and the root. If a paper is not relevant for you, copy the id into
+      the `excluded.txt`.
    3. Extend the depth by increasing `-d` (but narrow `-m` again), e.g.
-      `citation_graph -v -d=3 -m=100 -x=excluded.txt <YOUR DOI>`
-   4. Exclude irrelevant papers, as described in step 4 and 5.2
+      `citation_graph -v -d=3 -m=100 -x=excluded.txt <YOUR DOI>` (compare `-m=100` to
+      `-m=200` in the previous run).
+   4. Exclude irrelevant papers, as described in step 4 or 5.2
    5. Start over at 5.1
    6. Repeat this until increasing `-d` and `-m` does not change the result graph
       anymore (`citation_graph` will tell you about collecting papers for a specific
-      level, but no more requests are started. This means, no more papers can be
-      collected.)
+      level, but no more requests are started). This means, no more papers can be
+      collected.
 6. Done. You found the full citation graph of your paper (where citations are mentioned
    in at least one of the supported databases).
 

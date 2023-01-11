@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 1.2.6 (In Progress)
+- Improve README
+
+## Version 1.2.5
+- Remove `setuptools` to prevent usage of https://access.redhat.com/security/cve/CVE-2022-40897
+- Add APIs to README
+
 ## Version 1.2.4
 - Add test for `Paper`
 - Add equality checks for `Paper`
