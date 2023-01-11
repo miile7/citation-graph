@@ -175,3 +175,14 @@ citation_graph  [-h] [--version] [-v] [-vv] [--max-depth MAX_DEPTH] [--clear-cac
   settings for the databases, e.g. API keys. Each database has its own section, the keys
   depend on the database. If not given, the program will look for a file with the name
   config.ini in the current working directory
+
+## Supported databases
+
+- ✅ https://semanticscholar.org/
+- ❌ https://api.crossref.org - Needs (payed) plus access, will not be implemented (in near future)
+- ❌ https://developer.ieee.org/ - Citations not supported
+- ⏳ https://api.base-search.net/
+- ⏳ https://core.ac.uk/services/api
+- ⏳ https://dev.elsevier.com/
+- ⏳ http://developers.amctheatres.com/
+- ⏳ Academic Knowledge API
