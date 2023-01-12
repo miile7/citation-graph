@@ -1,11 +1,11 @@
 # Citation Graph
 
 <picture style="width: 750px;">
-  <source type="image/jpg" srcset="docs/screenshot1.jpg" style="width: 100%;" />
+  <source type="image/jpg" srcset="docs/screenshot1.jpg" style="width: 750px;" />
   <img src='https://github.com/miile7/citation-graph/blob/main/docs/screenshot1.jpg?raw=true' width="750px" alt="Overview over all citations" />
 </picture>
 <picture style="width: 750px;">
-  <source type="image/jpg" srcset="docs/screenshot2.jpg" style="width: 100%;" />
+  <source type="image/jpg" srcset="docs/screenshot2.jpg" style="width: 750px;" />
   <img src='https://github.com/miile7/citation-graph/blob/main/docs/screenshot2.jpg?raw=true' width="750px" alt="Hover over node for more details" />
 </picture>
 
