@@ -1,4 +1,6 @@
 from collections import OrderedDict
+from logging import Logger
+from pathlib import Path
 from typing import List
 import pytest
 
@@ -9,6 +11,7 @@ from citation_graph.paper import (
     Paper,
     PAPER_ID_TYPE_SEPARATOR,
 )
+from tests.utils import mocked_logger
 
 
 @pytest.fixture()
@@ -49,6 +52,13 @@ def test_authors_str(
     assert paper.get_authors_str(short=True) == short_authors
 
 
+def test_str(paper: Paper) -> None:
+    paper_str = str(paper)
+
+    assert paper.authors[0].lastname in paper_str
+    assert str(paper.year) in paper_str
+
+
 @pytest.mark.parametrize("id_type", ID_TYPES)
 def test_external_ids(paper: Paper, id_type: IdType) -> None:
     id_value = "id_value"
@@ -59,6 +69,15 @@ def test_external_ids(paper: Paper, id_type: IdType) -> None:
     assert paper.get_id() == f"{id_type}{PAPER_ID_TYPE_SEPARATOR}{id_value}"
     assert paper.get_raw_id() == id_value
     assert paper._get_id() == (id_type, id_value)
+
+
+def test_external_id_is_missing(paper: Paper):
+    with pytest.raises(KeyError):
+        paper._get_id()
+
+    assert paper.get_id() is None
+    assert paper.get_id_type() is None
+    assert paper.get_raw_id() is None
 
 
 @pytest.mark.parametrize("title, expected_title", [("á", "a")])
@@ -156,3 +175,46 @@ def test_similar(paper1: Paper, paper2: Paper) -> None:
 )
 def test_different(paper1: Paper, paper2: Paper) -> None:
     assert paper1 != paper2
+
+
+@pytest.mark.parametrize("id_type", ID_TYPES)
+def test_partial_from_string(id_type: IdType) -> None:
+    paper_id = f"{id_type}{PAPER_ID_TYPE_SEPARATOR}test-id"
+
+    paper = Paper.partial_from_string(paper_id)
+
+    assert paper.get_id_type() == id_type
+    assert paper.get_id() == paper_id
+    assert paper.get_raw_id() == "test-id"
+
+
+@pytest.mark.parametrize(
+    "paper_id",
+    ["invalid-format", "invalid::format::test", "invalid::id_type", "empty-id::"],
+)
+def test_partial_from_string_invalid(paper_id) -> None:
+    with pytest.raises(ValueError):
+        Paper.partial_from_string(paper_id)
+
+
+def test_from_file(tmp_path: Path, mocked_logger: Logger) -> None:
+    test_ids = [
+        f"{id_type}{PAPER_ID_TYPE_SEPARATOR}test-id-{i}"
+        for i, id_type in enumerate(ID_TYPES)
+    ]
+
+    file_path = tmp_path / "papers.txt"
+
+    file_content = test_ids.copy()
+    file_content.insert(len(test_ids) // 2, "# This is another comment test")
+    file_content.insert(
+        0, "# This file is generated for testing only. This line tests a comment"
+    )
+
+    with open(file_path, "w") as f:
+        f.write("\n".join(file_content))
+
+    papers = list(Paper.from_file(file_path, mocked_logger))
+
+    assert len(test_ids) == len(papers)
+    assert set(test_ids) == set((p.get_id() for p in papers))
