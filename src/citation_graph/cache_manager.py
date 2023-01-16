@@ -2,13 +2,17 @@ from argparse import Namespace
 from contextlib import AbstractContextManager
 from copy import deepcopy
 from json import JSONEncoder, dump, load
-from logging import Logger, getLogger
+from logging import DEBUG, Logger, getLogger
 from pathlib import Path
 from queue import SimpleQueue
 from threading import Thread
 from time import time
 from typing import Any, Dict, List, Literal, Optional
-from citation_graph.database import Database
+from citation_graph.database import (
+    Database,
+    is_valid_citation_cache,
+    is_valid_paper_cache,
+)
 
 from citation_graph.paper import AuthorName, Paper
 from citation_graph.static import SLUG
@@ -16,7 +20,53 @@ from citation_graph.utils import get_cache_dir, get_valid_filename
 from citation_graph.version import get_version
 
 
-FILE_SPECIFICATION_VERSION = 2
+FILE_SPECIFICATION_VERSION = 3
+
+META_KEY = "_meta"
+
+
+def fix_invalid_paper_cache(
+    logger: Logger, o: Any, meta: Optional[Dict[str, Any]] = None
+) -> bool:
+    if Logger.root.level <= DEBUG:
+        logger.debug(f"Checking object {o} for being a valid paper cache.")
+
+    return is_valid_paper_cache(o)
+
+
+def fix_invalid_citation_cache(
+    logger: Logger, o: Any, meta: Optional[Dict[str, Any]] = None
+) -> bool:
+    if Logger.root.level <= DEBUG:
+        logger.debug(f"Checking object {o} for being a valid citation cache.")
+
+    if is_valid_citation_cache(o, FILE_SPECIFICATION_VERSION):
+        return True
+
+    if is_valid_citation_cache(o, 2):
+        loaded_version = 2
+        logger.info(f"Trying to fix citation cache of version {loaded_version}.")
+
+        assert isinstance(o, dict)
+
+        try:
+            paper_ids = list(o.keys())
+            for paper_id in paper_ids:
+                o[paper_id] = {
+                    "papers": o[paper_id],
+                    "offset": 0,
+                    "limit": len(o[paper_id])
+                }
+        except Exception as e:
+            logger.warning(
+                f"Cannot fix citation cache of cache file version {loaded_version} to "
+                f"work with cache file version {FILE_SPECIFICATION_VERSION}: {e}"
+            )
+            return False
+
+        return True
+
+    return False
 
 
 class CustomJsonEncoder(JSONEncoder):
@@ -81,6 +131,7 @@ class CacheManager(AbstractContextManager):
     cache_file_path: Path
     logger: Logger
 
+    _loaded_meta: Optional[Dict[str, Any]]
     data: Dict[str, Any]
     queue: SimpleQueue
 
@@ -119,6 +170,7 @@ class CacheManager(AbstractContextManager):
 
         self.load_cache = load_cache_on_startup
         self.data = {}
+        self._loaded_meta = None
         self.queue = SimpleQueue()
         self.worker = CacheWorker(self.queue, self.cache_file_path)
 
@@ -130,10 +182,10 @@ class CacheManager(AbstractContextManager):
         if not isinstance(self.data, dict):
             self.data = {}
 
-        if "_meta" not in self.data:
-            self.data["_meta"] = []
+        if META_KEY not in self.data:
+            self.data[META_KEY] = []
 
-        self.data["_meta"].append(
+        self.data[META_KEY].append(
             {
                 "creator": SLUG,
                 "file-spec-version": FILE_SPECIFICATION_VERSION,
@@ -196,11 +248,44 @@ class CacheManager(AbstractContextManager):
             )
             return
 
+        self._loaded_meta = None
+        data: Optional[Dict[str, Any]] = None
         with open(self.cache_file_path, "r", encoding="utf-8") as cache_file:
-            load(cache_file, object_hook=self._read_file_create_objects)
+            data = load(cache_file, object_hook=self._read_file_create_objects)
+
+        if isinstance(data, dict) and META_KEY in data:
+            meta = data[META_KEY]
+
+            if isinstance(meta, list) and len(meta) > 0:
+                last_save_meta = meta[-1]
+                if (
+                    isinstance(last_save_meta, dict)
+                    and "file-spec-version" in last_save_meta
+                ):
+                    file_spec_version = last_save_meta["file-spec-version"]
+
+                    if file_spec_version != FILE_SPECIFICATION_VERSION:
+                        self.logger.warning(
+                            "Loaded cache file has file specification version "
+                            f"{file_spec_version} but the loader has version "
+                            f"{FILE_SPECIFICATION_VERSION}. This means, the cache file "
+                            "is old. This may cause problems. If something does not "
+                            "work as expected, restart and disable loading the cache "
+                            "file."
+                        )
 
     def _read_file_create_objects(self, o: Any) -> Any:
-        if isinstance(o, dict) and "__type" in o:
+        if (
+            isinstance(o, dict)
+            and "version" in o
+            and "time" in o
+            and "args" in o
+            and "creator" in o
+            and o["creator"] == SLUG
+        ):
+            self._loaded_meta = o  # save meta data at the start
+            return o
+        elif isinstance(o, dict) and "__type" in o:
             if o["__type"] == "Paper":
                 del o["__type"]
                 return Paper(**o)
@@ -212,8 +297,27 @@ class CacheManager(AbstractContextManager):
             elif o["__type"] == "Database":
                 for database in self.databases:
                     if database.name == o["name"]:
-                        database.citation_cache = o["citation_cache"]
-                        database.paper_cache = o["paper_cache"]
+                        if fix_invalid_paper_cache(self.logger, o["paper_cache"]):
+                            database.set_paper_cache(o["paper_cache"])
+                        else:
+                            self.logger.debug(
+                                f"Could not load paper cache for {database.name}, "
+                                "paper cache structure is invalid for this loader "
+                                "(loader for file specification version "
+                                f"{FILE_SPECIFICATION_VERSION})."
+                            )
+
+                        if fix_invalid_citation_cache(
+                            self.logger, o["citation_cache"]
+                        ):
+                            database.set_citation_cache(o["citation_cache"])
+                        else:
+                            self.logger.debug(
+                                f"Could not load citation cache for {database.name}, "
+                                "citation cache structure is invalid for this loader "
+                                "(loader for file specification version "
+                                f"{FILE_SPECIFICATION_VERSION})."
+                            )
 
                         self.logger.info(
                             f"Restored {len(database.paper_cache)} papers and"

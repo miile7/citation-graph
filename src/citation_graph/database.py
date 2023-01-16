@@ -1,7 +1,7 @@
 from collections import defaultdict
 from configparser import ConfigParser
 from logging import DEBUG, Logger
-from typing import DefaultDict, Dict, List, Literal, Optional, TypedDict, Union
+from typing import Any, DefaultDict, Dict, List, Literal, Optional, TypedDict, Union
 
 from citation_graph.paper import IdType, Paper
 
@@ -10,7 +10,7 @@ REQUEST_TIMEOUT = 10
 
 
 class _CitationDictEntry(TypedDict):
-    papers: list
+    papers: List[str]
     offset: int
     limit: int
 
@@ -25,6 +25,42 @@ class DatabaseJsonRepresentation(TypedDict):
     name: str
     citation_cache: CitationCache
     paper_cache: PaperCache
+
+
+def is_valid_paper_cache(o: Any) -> bool:
+    if not isinstance(o, dict):
+        return False
+    return all((isinstance(key, str) for key in o.keys())) and all(
+        (isinstance(value, Paper) for value in o.values())
+    )
+
+
+def is_valid_citation_cache(o: Any, file_spec_version: int) -> bool:
+    if not isinstance(o, dict):
+        return False
+
+    if file_spec_version == 2:
+        return all((isinstance(key, str) for key in o.keys())) and all(
+            (isinstance(value, str) for value in o.values())
+        )
+    elif file_spec_version == 3:
+        return all((isinstance(key, str) for key in o.keys())) and all(
+            (
+                isinstance(value, dict)
+                and "papers" in value
+                and isinstance(value["papers"], list)
+                and "offset" in value
+                and isinstance(value["offset"], int)
+                and "limit" in value
+                and isinstance(value["limit"], int)
+                for value in o.values()
+            )
+        )
+    else:
+        raise ValueError(
+            f"Invalid file specification version '{file_spec_version}', cannot check "
+            "if the data is compatible with this version."
+        )
 
 
 def _citation_cache_entry_factory() -> _CitationDictEntry:
@@ -59,11 +95,21 @@ class Database:
         self.page_size = page_size
         self.error_count = error_count
 
+        self.set_citation_cache(citation_cache)
+        self.set_paper_cache(paper_cache)
+
+    def set_citation_cache(self, citation_cache: Optional[CitationCache]) -> None:
         self.citation_cache = (
             defaultdict(_citation_cache_entry_factory)
             if citation_cache is None
-            else citation_cache
+            else (
+                citation_cache
+                if isinstance(citation_cache, defaultdict)
+                else defaultdict(_citation_cache_entry_factory, citation_cache)
+            )
         )
+
+    def set_paper_cache(self, paper_cache: Optional[PaperCache]) -> None:
         self.paper_cache = {} if paper_cache is None else paper_cache
 
     def has_all_citation_cache_entries(
@@ -84,11 +130,19 @@ class Database:
     ) -> List[Paper]:
         paper_id = paper.get_id()
         if paper_id is not None:
-            ids = self.citation_cache[paper_id]["papers"][offset : offset + limit]
-            self.logger.debug(
-                f"Found {len(ids)} entries in the cache for {paper} for offset {offset}"
-                f" and limit {limit}"
-            )
+            try:
+                ids = self.citation_cache[paper_id]["papers"][offset : offset + limit]
+                self.logger.debug(
+                    f"Found {len(ids)} entries in the cache for {paper} for offset {offset}"
+                    f" and limit {limit}"
+                )
+            except (KeyError, IndexError) as e:
+                self.logger.debug(
+                    f"Could not access paper cache for paper {paper} with offset "
+                    f"{offset} and limit {limit}: {e}"
+                )
+                return []
+
             return [self.paper_cache[id_] for id_ in ids]
 
         return []

@@ -1,7 +1,9 @@
 # Changelog
 
-## Version 1.2.6 (In Progress)
+## Version 1.2.6
 - Improve README
+- Fix loading old cache files
+- Improve robustness against cache file errors
 
 ## Version 1.2.5
 - Remove `setuptools` to prevent usage of https://access.redhat.com/security/cve/CVE-2022-40897
