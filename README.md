@@ -188,11 +188,13 @@ citation_graph  [-h] [--version] [-v] [-vv] [--max-depth MAX_DEPTH] [--clear-cac
 
 ## Supported databases
 
-- ✅ https://semanticscholar.org/
-- ❌ https://api.crossref.org - Needs (payed) plus access, will not be implemented (in near future)
-- ❌ https://developer.ieee.org/ - Citations not supported
-- ⏳ https://api.base-search.net/
-- ⏳ https://core.ac.uk/services/api
-- ⏳ https://dev.elsevier.com/
-- ⏳ http://developers.amctheatres.com/
-- ⏳ Academic Knowledge API
+- ✅ Semantic Scholar (https://semanticscholar.org/)
+- ❌ Crossref (https://api.crossref.org) - Needs (payed) plus access, will not be implemented (in near future)
+- ❌ IEEE Xplore (https://developer.ieee.org/) - Citations not supported
+- ⏳ Unpaywall (https://www.unpaywall.org/)
+- ⏳ OpenCitations (http://opencitations.net/)
+- ⏳ Base search (https://api.base-search.net/)
+- ⏳ Core (https://core.ac.uk/services/api)
+- ⏳ Scopus API (https://dev.elsevier.com/)
+- ⏳ Microsoft Academic Knowledge API
+- ⏳ ACM Digital Library (https://dl.acm.org/)

@@ -1,9 +1,13 @@
 # Changelog
 
+## Version 1.2.7
+- Fix security vulnerability due to IPython version
+
 ## Version 1.2.6
 - Improve README
 - Fix loading old cache files
 - Improve robustness against cache file errors
+- Fix loading cache file error
 
 ## Version 1.2.5
 - Remove `setuptools` to prevent usage of https://access.redhat.com/security/cve/CVE-2022-40897
